@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  # ── MongoDB ─────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0
+    container_name: nlp_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-changeme}
+
+  # ── Daily pipeline runner ────────────────────────────────────────────────
+  pipeline:
+    build: .
+    container_name: nlp_pipeline
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: mongodb://admin:changeme@mongo:27017/?authSource=admin
+      RAW_DB_NAME: nlp_raw
+      CLEAN_DB_NAME: nlp_clean
+      SCRAPE_HOUR: "0"
+    command: python scripts/run_daily.py
+
+volumes:
+  mongo_data:
