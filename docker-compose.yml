@@ -1,32 +1,22 @@
 version: "3.9"
 
-services:
-  # ── MongoDB ─────────────────────────────────────────────────────────────
-  mongo:
-    image: mongo:7.0
-    container_name: nlp_mongo
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASS:-changeme}
+# MongoDB is a LOCAL INSTALL on the host machine — it is NOT containerised here.
+# Make sure MongoDB is running locally on port 27017 before starting this stack.
+#
+# Windows / Mac (Docker Desktop): host.docker.internal resolves to the host automatically.
+# Linux: the extra_hosts entry below maps host.docker.internal to the host gateway.
 
-  # ── Daily pipeline runner ────────────────────────────────────────────────
+services:
+  # ── Daily pipeline runner (scrape + clean) ──────────────────────────────
   pipeline:
     build: .
     container_name: nlp_pipeline
     restart: unless-stopped
-    depends_on:
-      - mongo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # Linux only; harmless on Win/Mac
     environment:
-      MONGO_URI: mongodb://admin:changeme@mongo:27017/?authSource=admin
+      MONGO_URI: mongodb://host.docker.internal:27017
       RAW_DB_NAME: nlp_raw
       CLEAN_DB_NAME: nlp_clean
       SCRAPE_HOUR: "0"
     command: python scripts/run_daily.py
-
-volumes:
-  mongo_data:
