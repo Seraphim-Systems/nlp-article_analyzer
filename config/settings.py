@@ -1,10 +1,10 @@
-"""
+﻿"""
 Central configuration.
 
 All tuneable values are read from environment variables (with sensible defaults)
 so that the same codebase runs locally, in Docker, or in CI without code changes.
 
-Copy .env.example → .env and fill in your own values.
+Copy .env.example ΓåÆ .env and fill in your own values.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class Settings:
     # Scheduler
     # ------------------------------------------------------------------
 
-    #: UTC hour at which the daily scrape job runs (0–23)
+    #: UTC hour at which the daily scrape job runs (0ΓÇô23)
     SCRAPE_HOUR: int = field(
         default_factory=lambda: _env_int("SCRAPE_HOUR", 0)   # midnight
     )
@@ -70,9 +70,9 @@ class Settings:
     # ------------------------------------------------------------------
     #
     # Each entry is a dict:
-    #   name (str)  — display name / value for the `feed` field
-    #   url  (str)  — RSS / Atom feed URL
-    #   lang (str)  — BCP-47 language code (default "en")
+    #   name (str)  ΓÇö display name / value for the `feed` field
+    #   url  (str)  ΓÇö RSS / Atom feed URL
+    #   lang (str)  ΓÇö BCP-47 language code (default "en")
     #
     # Add, remove, or swap feeds here without touching scraper code.
     # ------------------------------------------------------------------

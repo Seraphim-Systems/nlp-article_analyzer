@@ -1,5 +1,5 @@
-"""
-Repository layer — all MongoDB read/write operations for articles.
+﻿"""
+Repository layer ΓÇö all MongoDB read/write operations for articles.
 
 Uses two separate collections:
   - raw_articles  (in RAW_DB)  : articles as scraped, never mutated after insert
@@ -27,7 +27,7 @@ from database.models import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Collection accessors (lazy — only touch DB when first called)
+# Collection accessors (lazy ΓÇö only touch DB when first called)
 # ---------------------------------------------------------------------------
 
 def _ensure_collection(db, name: str, validator, indexes) -> Collection:

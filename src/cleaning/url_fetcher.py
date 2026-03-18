@@ -50,7 +50,6 @@ def _fetch_article_data(url: str, lang: str = "en") -> dict[str, Any]:
         "refs":  list(art.movies) or None,
         "sum":   art.summary or None,
         "body":  art.text or None,
-        "text":  art.text or None,
     }
 
 

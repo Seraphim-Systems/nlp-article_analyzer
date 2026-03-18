@@ -21,7 +21,7 @@ from typing import Any
 CRUCIAL_FIELDS: tuple[str, ...] = ("url", "title", "body")
 
 # Fields whose absence degrades quality but doesn't make the article useless
-NON_CRUCIAL_FIELDS: tuple[str, ...] = ("type", "pub", "ret", "lang", "refs", "sum", "text")
+NON_CRUCIAL_FIELDS: tuple[str, ...] = ("type", "pub", "ret", "lang", "refs", "sum")
 
 
 def _is_empty(value: Any) -> bool:

@@ -1,5 +1,5 @@
-"""
-Main daily pipeline: scrape → clean → promote.
+﻿"""
+Main daily pipeline: scrape ΓåÆ clean ΓåÆ promote.
 
 This is the single entry-point that ties together the scraper scheduler
 and the cleaning pipeline.  Running this script once is equivalent to one
@@ -34,10 +34,10 @@ def run(for_date: date | None = None) -> None:
     target = for_date or date.today()
     logger.info("Pipeline starting for date: %s", target)
 
-    # Phase 1 — Collect
+    # Phase 1 ΓÇö Collect
     run_scrape_job(for_date=target)
 
-    # Phase 2 — Clean
+    # Phase 2 ΓÇö Clean
     summary = run_cleaning_pipeline()
     logger.info("Pipeline complete. Summary: %s", summary)
 

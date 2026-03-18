@@ -1,13 +1,13 @@
-"""
+﻿"""
 Data cleaning pipeline.
 
 Orchestrates the full cleaning flow on raw articles:
 
-  Step 1 — Rank all unranked raw articles (assign rank 0 / 1 / 2).
-  Step 2 — For Rank-1 articles: attempt to fill missing fields via URL re-fetch,
+  Step 1 ΓÇö Rank all unranked raw articles (assign rank 0 / 1 / 2).
+  Step 2 ΓÇö For Rank-1 articles: attempt to fill missing fields via URL re-fetch,
             then re-rank; articles that reach Rank 0 are promoted.
-  Step 3 — Rank-2 articles are deleted from the raw collection.
-  Step 4 — Rank-0 articles are upserted into the clean collection.
+  Step 3 ΓÇö Rank-2 articles are deleted from the raw collection.
+  Step 4 ΓÇö Rank-0 articles are upserted into the clean collection.
 
 The raw collection always retains the original scraped data (minus rank-2
 documents) as a safety net.  The clean collection holds only quality-verified
@@ -44,7 +44,7 @@ def _rank_unranked_articles() -> None:
         logger.info("No unranked articles found.")
         return
 
-    logger.info("Ranking %d unranked articles…", len(unranked))
+    logger.info("Ranking %d unranked articlesΓÇª", len(unranked))
     for article in unranked:
         rank = rank_article(article)
         update_raw_rank(article["url"], rank)
@@ -62,7 +62,7 @@ def _process_rank1() -> None:
         logger.info("No Rank-1 articles to process.")
         return
 
-    logger.info("Attempting to recover %d Rank-1 articles…", len(rank1_articles))
+    logger.info("Attempting to recover %d Rank-1 articlesΓÇª", len(rank1_articles))
     promoted = 0
 
     for article in rank1_articles:

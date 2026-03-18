@@ -1,4 +1,4 @@
-"""
+﻿"""
 MongoDB connection manager.
 
 Two separate MongoDB databases are maintained:

@@ -2,14 +2,13 @@
 Daily scraper scheduler.
 
 Runs once a day at midnight (configurable via settings.SCRAPE_HOUR).
-On each run it:
-  1. Calls every registered scraper to collect today's articles.
-  2. Bulk-inserts the results into the raw MongoDB collection.
+On each run it fetches today's articles from all configured RSS feeds
+and bulk-inserts them into the raw MongoDB collection.
 
-This module can be run directly:
+Usage
+-----
     python -m scraper.scheduler
-
-Or invoked from scripts/run_daily.py by an OS-level cron / Task Scheduler job.
+    python scripts/run_daily.py
 """
 
 from __future__ import annotations
@@ -18,22 +17,13 @@ import logging
 import time
 from datetime import date
 
-import schedule  # pip install schedule
+import schedule
 
 from config.settings import settings
 from database.repositories import insert_raw_articles
-from scraper.scrapers.rss_scraper import build_rss_scrapers
+from scraper.scraper import build_rss_scrapers
 
 logger = logging.getLogger(__name__)
-
-
-def _collect_all_scrapers():
-    """Return all active scraper instances."""
-    scrapers = []
-    scrapers.extend(build_rss_scrapers())
-    # Add additional scraper types here as the project grows:
-    # scrapers.extend(build_web_scrapers())
-    return scrapers
 
 
 def run_scrape_job(for_date: date | None = None) -> None:
@@ -48,10 +38,8 @@ def run_scrape_job(for_date: date | None = None) -> None:
     target = for_date or date.today()
     logger.info("=== Scrape job started for %s ===", target)
 
-    scrapers = _collect_all_scrapers()
     all_articles: list[dict] = []
-
-    for scraper in scrapers:
+    for scraper in build_rss_scrapers():
         try:
             articles = scraper.scrape_today(target)
             all_articles.extend(articles)
@@ -69,7 +57,6 @@ def run_scrape_job(for_date: date | None = None) -> None:
 def start_scheduler() -> None:
     """
     Block forever, running the scrape job daily at settings.SCRAPE_HOUR:00 UTC.
-    Designed to be called from the main process or a long-running service.
     """
     hour = settings.SCRAPE_HOUR
     logger.info("Scheduler started — daily scrape at %02d:00 UTC.", hour)

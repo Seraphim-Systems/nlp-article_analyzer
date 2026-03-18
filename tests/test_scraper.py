@@ -1,10 +1,9 @@
-"""
-Unit tests for the RSS scraper helpers (no network calls).
+﻿"""
+Unit tests for the RSS scraper (no network calls).
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
-from scraper.scrapers.rss_scraper import RssScraper
+from scraper.scraper import RssScraper
 
 
 FEED_CONFIG = {"name": "Test Feed", "url": "https://example.com/rss", "lang": "en"}
@@ -27,8 +26,8 @@ def test_parse_article_returns_none_on_empty_body():
     mock_art.title = ""
     mock_art.text = ""
 
-    with patch("scraper.scrapers.rss_scraper.NewspaperArticle", return_value=mock_art):
-        result = scraper.parse_article("https://example.com/article")
+    with patch("scraper.scraper.NewspaperArticle", return_value=mock_art):
+        result = scraper._parse_article("https://example.com/article")
 
     assert result is None
 
@@ -44,8 +43,8 @@ def test_parse_article_returns_dict_on_success():
     mock_art.movies = []
     mock_art.summary = "A summary."
 
-    with patch("scraper.scrapers.rss_scraper.NewspaperArticle", return_value=mock_art):
-        result = scraper.parse_article("https://example.com/article")
+    with patch("scraper.scraper.NewspaperArticle", return_value=mock_art):
+        result = scraper._parse_article("https://example.com/article")
 
     assert result is not None
     assert result["title"] == "Test Title"
