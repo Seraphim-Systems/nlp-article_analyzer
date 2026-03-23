@@ -140,7 +140,7 @@ docker compose up -d
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
-| `KAGGLE_ENABLED` | `true` | Download and ingest Kaggle dataset on first boot |
+| `KAGGLE_ENABLED` | `false` | Download and ingest Kaggle dataset on first boot (jobs service only) |
 | `KAGGLE_KEY` | _(empty)_ | Kaggle API key (modern tokens only) |
 | `SKIP_BOOTSTRAP` | `false` | Skip dataset bootstrap entirely (set `true` after first run) |
 | `LOG_LEVEL` | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |

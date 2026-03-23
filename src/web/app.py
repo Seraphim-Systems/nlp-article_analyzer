@@ -275,14 +275,15 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
     job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {
-        "job_id":      job_id,
-        "job_name":    request.job_name,
-        "status":      "queued",
-        "started_at":  datetime.utcnow().isoformat() + "Z",
-        "finished_at": None,
-        "result":      None,
-    }
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "job_id":      job_id,
+            "job_name":    request.job_name,
+            "status":      "queued",
+            "started_at":  datetime.utcnow().isoformat() + "Z",
+            "finished_at": None,
+            "result":      None,
+        }
 
     t = threading.Thread(
         target=_run_job_thread,
@@ -302,16 +303,20 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
 @app.get("/jobs/{job_id}", tags=["jobs"], response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """Poll job status by ID."""
-    job = _jobs.get(job_id)
-    if not job:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        snapshot = dict(job) if job else None
+    if not snapshot:
         raise HTTPException(404, f"Job {job_id} not found")
-    return JobStatusResponse(**job)
+    return JobStatusResponse(**snapshot)
 
 
 @app.get("/jobs", tags=["jobs"])
 async def list_jobs() -> dict:
     """List all tracked jobs (most recent first)."""
-    jobs = sorted(_jobs.values(), key=lambda j: j["started_at"], reverse=True)
+    with _jobs_lock:
+        snapshot = [dict(j) for j in _jobs.values()]
+    jobs = sorted(snapshot, key=lambda j: j["started_at"], reverse=True)
     return {"jobs": jobs[:50]}
 
 
