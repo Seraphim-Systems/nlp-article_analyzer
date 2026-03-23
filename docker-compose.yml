@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ──────────────────────────────────────────────────────────────────────────
 # LOCAL DEVELOPMENT SETUP
 # ──────────────────────────────────────────────────────────────────────────
@@ -35,11 +33,7 @@ services:
     environment:
       MONGO_INITDB_DATABASE: admin
     healthcheck:
-      test: 
-        - CMD
-        - python3
-        - -c
-        - "import socket; socket.create_connection(('localhost', 27017), timeout=2)"
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -49,6 +43,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    networks:
+      - nlp_network
 
   # ── Job scheduler / pipeline runner ──────────────────────────────────────
   jobs:
@@ -68,10 +64,12 @@ services:
       MODELS_DB_NAME: nlp_models
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
-      KAGGLE_ENABLED: "false"
+      KAGGLE_ENABLED: "true"
       SKIP_BOOTSTRAP: "false"
-    # Entrypoint handles init + bootstrap, CMD specifies which job to run
-    command: job scrape
+    # Entrypoint handles init + bootstrap, then waits for manual job execution
+    # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
+    # Or schedule via cron using orchestrate_jobs.sh
+    command: wait
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
@@ -104,7 +102,7 @@ services:
       MODELS_DB_NAME: nlp_models
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
-      KAGGLE_ENABLED: "false"
+      KAGGLE_ENABLED: "true"
       SKIP_BOOTSTRAP: "false"
     # Entrypoint handles init + bootstrap, CMD specifies 'api' service
     command: api

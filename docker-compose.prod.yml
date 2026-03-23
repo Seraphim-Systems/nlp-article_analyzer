@@ -49,11 +49,7 @@ services:
       # MONGO_INITDB_ROOT_USERNAME: admin
       # MONGO_INITDB_ROOT_PASSWORD: <secure-password>
     healthcheck:
-      test: 
-        - CMD
-        - python3
-        - -c
-        - "import socket; socket.create_connection(('localhost', 27017), timeout=2)"
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -97,11 +93,11 @@ services:
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       # Kaggle bootstrap (set in .env if needed)
-      KAGGLE_ENABLED: "false"
+      KAGGLE_ENABLED: "true"
       SKIP_BOOTSTRAP: "true"
-    # Entrypoint handles init + bootstrap, CMD specifies which job to run
-    # (orchestrated externally via cron/K8s)
-    command: job scrape
+    # Entrypoint handles init + bootstrap, then waits for scheduled job execution
+    # (orchestrated externally via cron/K8s CronJob or manual CLI)
+    command: wait
     deploy:
       resources:
         limits:
