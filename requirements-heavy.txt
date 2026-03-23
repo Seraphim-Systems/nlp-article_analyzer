@@ -1,0 +1,9 @@
+# Heavy ML libraries — split so Docker layer cache is preserved when app deps change.
+# These are installed first and rarely need updating.
+torch==2.3.0
+transformers==4.40.0
+accelerate==0.29.3
+spacy==3.8.3
+scikit-learn==1.6.1
+numpy==2.2.3
+pandas==2.2.3

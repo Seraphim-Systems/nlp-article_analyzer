@@ -13,6 +13,72 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_GREEN  = "\033[0;32m"
+_CYAN   = "\033[0;36m"
+_YELLOW = "\033[1;33m"
+_BOLD   = "\033[1m"
+_RESET  = "\033[0m"
+
+OK   = f"{_GREEN}[ OK ]{_RESET}"
+INFO = f"{_CYAN}[INFO]{_RESET}"
+WARN = f"{_YELLOW}[WARN]{_RESET}"
+
+
+def _print(tag: str, msg: str) -> None:
+    print(f"  {tag} {msg}", flush=True)
+
+
+def _print_comparison(clean_article: dict, ner_article: dict) -> None:
+    """Print a side-by-side comparison of clean vs NER-enriched article."""
+    url = clean_article.get("url", "?")
+    body = (clean_article.get("body") or "")[:400]
+    preprocessed = (clean_article.get("preprocessed_text") or "")[:400]
+    entities = ner_article.get("entities", [])
+
+    print(f"\n  {_BOLD}{'─' * 70}{_RESET}", flush=True)
+    print(f"  {_BOLD}NER SAMPLE COMPARISON{_RESET}", flush=True)
+    print(f"  {_BOLD}{'─' * 70}{_RESET}\n", flush=True)
+    print(f"  {_CYAN}Article:{_RESET} {url}\n", flush=True)
+
+    print(f"  {_BOLD}[clean_articles] body (first 400 chars):{_RESET}", flush=True)
+    print(f"  {body!r}\n", flush=True)
+
+    print(f"  {_BOLD}[clean_articles] preprocessed_text (first 400 chars):{_RESET}", flush=True)
+    print(f"  {preprocessed!r}\n", flush=True)
+
+    print(f"  {_BOLD}[ner_articles] entities found:{_RESET} {len(entities)}", flush=True)
+    if entities:
+        by_label: dict[str, list[str]] = {}
+        for ent in entities:
+            by_label.setdefault(ent.get("label", "?"), []).append(ent.get("text", ""))
+        for label, texts in sorted(by_label.items()):
+            unique = sorted(set(texts))[:8]
+            print(f"    {_GREEN}{label}{_RESET}: {', '.join(unique)}", flush=True)
+    else:
+        print(f"  {_YELLOW}  (no entities extracted){_RESET}", flush=True)
+    print(f"\n  {_BOLD}{'─' * 70}{_RESET}\n", flush=True)
+
+
+def _print_collection_sizes() -> None:
+    """Print final document counts for all pipeline collections."""
+    from database.connection import get_client
+    from config.settings import settings
+
+    client = get_client()
+    collections = [
+        (settings.RAW_DB_NAME,        settings.RAW_COLLECTION,  "raw articles"),
+        (settings.CLEAN_DB_NAME,      settings.CLEAN_COLLECTION,"clean articles"),
+        (settings.NER_DB_NAME,        settings.NER_COLLECTION,  "ner articles"),
+    ]
+
+    print(f"\n  {_BOLD}Collection sizes:{_RESET}", flush=True)
+    for db_name, col_name, label in collections:
+        count = client[db_name][col_name].count_documents({})
+        bar_len = min(count // 1000, 30)
+        bar = f"{_GREEN}{'●' * bar_len}{'○' * (30 - bar_len)}{_RESET}"
+        print(f"  {bar}  {_BOLD}{count:>7,}{_RESET}  {label}", flush=True)
+    print("", flush=True)
+
 
 def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
     """
@@ -20,19 +86,9 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
 
     Fetches all clean articles not yet in ner_articles, runs NER extraction
     via dslim/bert-base-NER, and upserts enriched documents into ner_articles.
-
-    Parameters
-    ----------
-    for_date : date, optional
-        Not used — kept for interface compatibility with other jobs.
-    dry_run : bool
-        If True, run extraction but skip DB writes.
-
-    Returns
-    -------
-    dict
-        Result with keys: status, classified_count, errors, duration_seconds
     """
+    from utils.progress import make_pbar_simple
+
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",
@@ -43,29 +99,95 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
 
     try:
         from database.init_db import init_databases
-        from database.repositories import get_unprocessed_clean_articles, insert_ner_articles
-        from features.ner_extractor import batch_extract
+        from database.repositories import (
+            get_unprocessed_clean_articles,
+            get_clean_collection,
+            get_ner_collection,
+            insert_ner_articles,
+        )
+        from features.ner_extractor import batch_extract, get_device_label
 
         init_databases()
 
-        logger.info("=== Classify (NER) job started ===")
+        _print(INFO, "=== NER (classify) job started ===")
+        _print(INFO, f"Loading NER model... (device: {get_device_label()})")
 
         articles = get_unprocessed_clean_articles()
-        logger.info("Found %d unprocessed clean articles", len(articles))
+        _print(INFO, f"Unprocessed clean articles: {len(articles):,}")
 
         if not articles:
-            logger.info("No unprocessed articles — nothing to do.")
+            _print(OK, "Nothing to process — all articles already enriched.")
+            _print_collection_sizes()
             return result
 
-        enriched = batch_extract(articles)
-        logger.info("NER extraction complete: %d articles enriched", len(enriched))
+        BATCH = 64
+        FLUSH_EVERY = BATCH * 4
+        pending: list[dict[str, Any]] = []
+        total_written = 0
+        total_entities = 0
+        batch_count = (len(articles) + BATCH - 1) // BATCH
 
-        if dry_run:
-            logger.info("DRY RUN: would write %d articles to ner_articles", len(enriched))
+        _print(INFO, f"Batch size: {BATCH} | Total batches: {batch_count}")
+
+        pbar = make_pbar_simple(
+            range(0, len(articles), BATCH),
+            total=batch_count,
+            desc="NER extraction",
+            unit="batch",
+        )
+
+        for i in pbar:
+            chunk = articles[i : i + BATCH]
+            enriched_chunk = batch_extract(chunk)
+            pending.extend(enriched_chunk)
+
+            batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
+            total_entities += batch_entities
+            articles_done = min(i + BATCH, len(articles))
+
+            pbar.set_postfix(
+                arts=f"{articles_done:,}",
+                ents=f"{total_entities:,}",
+                db=f"{total_written:,}",
+            )
+
+            if not dry_run and len(pending) >= FLUSH_EVERY:
+                flushed = insert_ner_articles(pending)
+                total_written += flushed
+                pending = []
+
+        if not dry_run:
+            if pending:
+                flushed = insert_ner_articles(pending)
+                total_written += flushed
+            result["classified_count"] = total_written
         else:
-            count = insert_ner_articles(enriched)
-            result["classified_count"] = count
-            logger.info("Wrote %d NER articles to ner_articles", count)
+            result["classified_count"] = len(articles)
+
+        duration = time.time() - start_time
+        arts_per_sec = len(articles) / max(duration, 1)
+
+        _print(OK, (
+            f"NER complete | articles={len(articles):,}"
+            f" | entities={total_entities:,}"
+            f" | written={result['classified_count']:,}"
+            f" | {arts_per_sec:.1f} art/s"
+        ))
+
+        # ── Sample comparison: one article from clean vs ner ──────────────────
+        clean_sample = get_clean_collection().find_one(
+            {"preprocessed_text": {"$exists": True, "$ne": ""}},
+            {"url": 1, "body": 1, "preprocessed_text": 1},
+        )
+        if clean_sample:
+            ner_sample = get_ner_collection().find_one({"url": clean_sample["url"]})
+            if ner_sample:
+                _print_comparison(clean_sample, ner_sample)
+            else:
+                _print(WARN, "Sample article not yet in ner_articles (may still be flushing)")
+
+        # ── Final collection sizes ────────────────────────────────────────────
+        _print_collection_sizes()
 
     except Exception as e:
         logger.exception("Classify job failed")
@@ -74,10 +196,10 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
 
     finally:
         result["duration_seconds"] = time.time() - start_time
-        logger.info(
-            "=== Classify job finished (status=%s, duration=%.2fs) ===",
-            result["status"],
-            result["duration_seconds"],
+        _print(
+            OK if result["status"] == "success" else f"\033[0;31m[FAIL]{_RESET}",
+            f"=== Classify job finished | status={result['status']}"
+            f" | duration={result['duration_seconds']:.1f}s ===",
         )
 
     return result

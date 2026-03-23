@@ -54,6 +54,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      cache_from: []  # rely on BuildKit cache mounts, not registry cache
     container_name: nlp_jobs_dev
     restart: unless-stopped
     depends_on:
@@ -77,7 +78,20 @@ services:
       SKIP_RANK1_RECOVERY: "true"
       RUN_CLEAN_AFTER_SCRAPE: "true"
       ENGLISH_ONLY: "true"
+      OMP_NUM_THREADS: "10"
+      MKL_NUM_THREADS: "10"
+      NVIDIA_VISIBLE_DEVICES: "all"
+    # Entrypoint handles init + bootstrap, then waits for manual job execution
+    # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
+    # Or schedule via cron using orchestrate_jobs.sh
     command: wait
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
@@ -96,6 +110,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      cache_from: []  # rely on BuildKit cache mounts, not registry cache
     container_name: nlp_api_dev
     restart: unless-stopped
     depends_on:
@@ -130,27 +145,20 @@ services:
     networks:
       - nlp_network
 
-  # ── React Frontend (Visualization Dashboard) ─────────────────────────────
+  # ── React/Vite frontend ──────────────────────────────────────────────────
   frontend:
     build:
-      context: ./web
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: nlp_frontend_dev
     restart: unless-stopped
     depends_on:
       - api
     ports:
-      - "3000:3000"
+      - "5173:5173"
     volumes:
-      - ./web:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
     networks:
       - nlp_network
 

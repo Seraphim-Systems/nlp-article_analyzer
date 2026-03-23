@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from tqdm import tqdm
+from utils.progress import make_pbar_simple
 
 from database.repositories import (
     bulk_update_raw_ranks,
@@ -50,7 +50,7 @@ def _rank_unranked_articles() -> None:
 
     logger.info("Ranking %d unranked articles…", len(unranked))
     updates = []
-    for article in tqdm(unranked, desc="  Ranking", unit="art", ncols=80):
+    for article in make_pbar_simple(unranked, total=len(unranked), desc="Ranking", unit="art"):
         rank, reasons = rank_article_with_reasons(article)
         updates.append((article["url"], rank, reasons))
     bulk_update_raw_ranks(updates)
@@ -71,7 +71,7 @@ def _process_rank1() -> None:
     promoted = 0
 
     rank_updates = []
-    for article in tqdm(rank1_articles, desc="  Recovering rank-1", unit="art", ncols=80):
+    for article in make_pbar_simple(rank1_articles, total=len(rank1_articles), desc="Recovering rank-1", unit="art"):
         patched = fill_missing_fields(article)
         new_rank, reasons = rank_article_with_reasons(patched)
 

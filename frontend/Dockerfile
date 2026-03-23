@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install deps with BuildKit cache
+COPY package.json .
+RUN --mount=type=cache,target=/root/.npm \
+    npm install
+
+COPY . .
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev"]
