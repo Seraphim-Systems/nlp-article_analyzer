@@ -1,422 +1,174 @@
 # NLP Article Analyzer
 
-An end-to-end NLP pipeline for scraping, cleaning, classifying, and evaluating news articles from multiple RSS feeds.
+End-to-end NLP pipeline that scrapes news articles from RSS feeds, cleans them, runs named-entity recognition, and produces TF-IDF comparisons of clean vs. NER-enhanced text.
 
-**Current Status**: Phases 1-2 complete. Phases 3-5 in progress.
+---
 
-## Features
+## Pipeline Stages
 
-- **Scraping** — Collect articles from RSS feeds with newspaper3k
-- **Cleaning** — Quality filtering and ranking (0=complete, 1=incomplete, 2=discard)
-- **Preprocessing** — NLP normalization (lowercasing, tokenization, lemmatization, stopword removal) using SpaCy
-- **Visualization Dashboard** — React-based web app for data monitoring and health status
-- **Classification** (Phase 3) — NLP categorization, entity extraction, sentiment analysis
-- **Evaluation** (Phase 4) — Model performance metrics and baselines
-- **REST API** (Phase 5) — Full query and job management interface
-- **Containerized** — Docker + MongoDB for easy deployment
-- **Production-Ready** — External network support, resource limits, logging
+| Stage | Job name | What it does |
+|-------|----------|--------------|
+| Scrape | `scrape` | Collects articles from RSS feeds via newspaper3k |
+| Clean | `clean` | Quality-filters and ranks articles (0 = complete, 1 = incomplete, 2 = discard) |
+| NER | `ner` | Runs `dslim/bert-base-NER` over clean articles; stores entity spans in `nlp_ner` |
+| Evaluate | `evaluate` | Computes model metrics against stored runs |
 
-## Quick Start (Development)
+**Stack:** Python 3.11 · FastAPI · React/Vite · MongoDB 7 · Docker Compose · HuggingFace Transformers
 
-### Prerequisites
+---
 
-- Docker Engine 20.10+
-- Docker Compose 2.0+
+## Prerequisites
+
+- Docker Desktop 4.x (Engine 20.10+, Compose 2.0+)
 - 8 GB RAM, 4 CPU cores
+- GPU optional — NER runs on CPU by default; set `NVIDIA_VISIBLE_DEVICES=all` in `.env` for GPU acceleration
 
-### Local Setup
+---
+
+## One-Shot Setup
 
 ```bash
-# Clone and enter project directory
+git clone <repo-url> nlp-article_analyzer
 cd nlp-article_analyzer
-
-# Start services (MongoDB, API, job runner, frontend)
-docker-compose up -d
-
-# Verify services
-docker-compose ps
-
-# View logs
-docker-compose logs -f api
+cp .env.example .env          # edit KAGGLE_KEY if you want dataset bootstrap
+docker compose up --build -d
 ```
 
-### Access the Dashboard
+Services start in order: MongoDB → jobs (bootstrap) → API → frontend.
 
-Once the services are running, you can access the visualization dashboard in your browser:
+### With a team database dump
 
-- **Dashboard**: [http://localhost:3000](http://localhost:3000)
-- **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **API Health**: [http://localhost:8000/health](http://localhost:8000/health)
-
-### Bootstrap with Kaggle Dataset (Optional)
-
-On first startup, the container can automatically download and ingest the Kaggle newsdata dataset if the database is empty.
-
-**Prerequisites:**
-- Kaggle account (https://www.kaggle.com/settings/account)
-- Download `kaggle.json` from Kaggle API settings
-
-**Setup:**
-
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit `.env` and add your Kaggle API token:
-   ```bash
-   KAGGLE_ENABLED=true
-   # Modern tokens: only paste the API key (no username needed)
-   KAGGLE_KEY=your-api-key
-   # Legacy tokens (optional): include username if using old format
-   KAGGLE_USERNAME=
-   ```
-
-3. Restart the containers:
-   ```bash
-   docker-compose down
-   docker-compose up -d
-   ```
-
-4. Watch the initialization:
-   ```bash
-   docker-compose logs -f api  # or -f jobs
-   ```
-
-The seed will:
-- Download the [newsdata dataset](https://www.kaggle.com/datasets/julianschelb/newsdata)
-- Parse JSON files
-- Ingest articles into the raw collection
-- Run the cleaning pipeline automatically
-- Start the service
-
-After bootstrap completes, you can use the API normally without re-downloading:
 ```bash
-# On subsequent restarts, bootstrap is skipped automatically
-SKIP_BOOTSTRAP=true  # (optional, already skipped if data exists)
+cp .env.example .env
+docker compose up --build -d mongodb   # start only MongoDB first
+bash scripts/db_restore.sh             # restore the dump (see Database Dump / Restore)
+docker compose up -d                   # bring up the rest
 ```
 
-### Run Jobs Manually
+---
+
+## Services
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| API | http://localhost:8000 | FastAPI, port 8000 |
+| API Docs | http://localhost:8000/docs | Swagger UI |
+| Frontend | http://localhost:5173 | React/Vite dev server |
+| MongoDB | localhost:27017 | No auth in dev |
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Version info |
+| `GET` | `/health` | Stack health check — MongoDB ping + collection counts |
+| `GET` | `/stats` | Lightweight collection document counts |
+| `POST` | `/jobs/trigger` | Trigger a pipeline job asynchronously (`scrape`, `clean`, `ner`, `evaluate`) |
+| `GET` | `/jobs` | List all tracked jobs |
+| `GET` | `/jobs/{job_id}` | Poll job status by ID |
+| `GET` | `/articles` | Paginated article list (`?collection=clean\|ner&search=...`) |
+| `GET` | `/articles/ner/{url_b64}` | NER-enriched article by base64-encoded URL |
+| `GET` | `/compare/tfidf` | TF-IDF comparison: clean text vs. NER-enhanced text |
+| `GET` | `/metrics` | Latest model evaluation metrics |
+
+---
+
+## Running Jobs
+
+### Via Docker (recommended)
 
 ```bash
 # Scrape articles from RSS feeds
-docker-compose exec jobs python scripts/run_job.py scrape
+docker compose exec jobs python scripts/run_job.py scrape
 
-# Clean articles
-docker-compose exec jobs python scripts/run_job.py clean
+# Clean and rank articles
+docker compose exec jobs python scripts/run_job.py clean
 
-# Classify articles (Phase 3)
-docker-compose exec jobs python scripts/run_job.py classify
+# Run NER extraction
+docker compose exec jobs python scripts/run_job.py ner
 
-# Evaluate model (Phase 4)
-docker-compose exec jobs python scripts/run_job.py evaluate
+# Evaluate model
+docker compose exec jobs python scripts/run_job.py evaluate
 
-# JSON output
-docker-compose exec jobs python scripts/run_job.py scrape --json
-
-# Dry-run (preview only)
-docker-compose exec jobs python scripts/run_job.py clean --dry-run
+# Optional flags
+docker compose exec jobs python scripts/run_job.py scrape --json     # JSON output
+docker compose exec jobs python scripts/run_job.py clean --dry-run   # preview only
 ```
 
-### MongoDB Access
+### Native NER (without Docker)
 
 ```bash
-# Connect to database
-docker-compose exec mongodb mongosh
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-heavy.txt
 
-# Query articles (from Python)
-docker-compose exec jobs python3 << 'EOF'
-from database.connection import get_raw_db
-db = get_raw_db()
-print(f"Articles: {db.articles.count_documents({})}")
-EOF
+PYTHONPATH=src:. .venv/bin/python scripts/run_job.py ner
 ```
 
-## Architecture
+---
 
-### Local Development (docker-compose.yml)
+## Database Dump / Restore
 
-```
-┌────────────────────────────────────┐
-│     Local Docker Network           │
-├────────────────────────────────────┤
-│ • MongoDB (port 27017)             │
-│ • API Service (port 8000)          │
-│ • Frontend Dashboard (port 3000)   │
-│ • Job Runner                       │
-│ ← Volume mounts for hot reload     │
-└────────────────────────────────────┘
+Scripts use `mongodump` / `mongorestore` against the running container.
+
+```bash
+# Dump all NLP databases to ./dump/
+bash scripts/db_dump.sh
+
+# Restore from ./dump/ into the running MongoDB container
+bash scripts/db_restore.sh
 ```
 
-### Production Deployment (docker-compose.prod.yml)
+`db_dump.sh` targets the `nlp_raw`, `nlp_clean`, and `nlp_ner` databases by default and writes BSON archives to `./dump/`. `db_restore.sh` reads from that same directory and replays them into the container — safe to run on an empty or populated instance.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for full setup instructions.
-
-```
-┌─────────────────────────────────────────┐
-│   External Docker Network               │
-│   (Managed by Reverse Proxy)            │
-├─────────────────────────────────────────┤
-│ • Reverse Proxy (Traefik/nginx)         │
-│ • MongoDB (persistent storage)          │
-│ • API Service (no exposed ports)        │
-│ • Job Runner (cron/K8s scheduled)       │
-└─────────────────────────────────────────┘
-```
-
-## Project Structure
-
-```
-.
-├── docker-compose.yml            # Local dev setup
-├── docker-compose.prod.yml       # Production setup
-├── Dockerfile                    # Container image
-├── requirements.txt              # Python dependencies
-│
-├── src/
-│   ├── pipeline.py              # Legacy entry point (use run_job.py)
-│   │
-│   ├── jobs/                    # Job orchestration (Phase 2)
-│   │   ├── __init__.py          # Job dispatcher
-│   │   ├── scrape_job.py        # Article collection
-│   │   ├── clean_job.py         # Data quality filtering
-│   │   ├── classify_job.py      # NLP classification (Phase 3)
-│   │   └── evaluate_job.py      # Model evaluation (Phase 4)
-│   │
-│   ├── web/                     # FastAPI service (Phase 5)
-│   │   ├── app.py               # REST endpoints
-│   │   └── __init__.py
-│   │
-│   ├── scraper/                 # Article collection
-│   │   ├── base_scraper.py
-│   │   ├── scheduler.py
-│   │   └── scrapers/
-│   │       └── rss_scraper.py
-│   │
-│   ├── cleaning/                # Data quality pipeline
-│   │   ├── cleaner.py
-│   │   ├── ranker.py
-│   │   └── url_fetcher.py
-│   │
-│   ├── database/                # MongoDB layer
-│   │   ├── connection.py        # Connection pooling
-│   │   ├── init_db.py           # Schema initialization (Phase 1)
-│   │   ├── models.py            # Data schema & indexes
-│   │   └── repositories.py      # CRUD operations
-│   │
-│   ├── modelling/               # ML models (Phase 3)
-│   │   └── __init__.py          # Placeholder
-│   │
-│   ├── features/                # Feature extraction (Phase 3)
-│   │   └── __init__.py          # Placeholder
-│   │
-│   ├── evaluation/              # Model evaluation (Phase 4)
-│   │   └── __init__.py          # Placeholder
-│   │
-│   └── preprocessing/           # Placeholder
-│
-├── scripts/
-│   ├── run_job.py               # CLI job runner (Phase 2)
-│   └── orchestrate_jobs.sh      # Cron/scheduler helper (Phase 2)
-│
-├── config/
-│   ├── settings.py              # Environment configuration
-│   └── __init__.py
-│
-├── tests/                       # Unit/integration tests
-│
-├── DEPLOYMENT.md                # Deployment & ops guide
-└── DEVELOPMENT.md               # Developer setup (TBD)
-```
+---
 
 ## Environment Variables
 
-```bash
-# Database
-MONGO_URI=mongodb://mongodb:27017
-RAW_DB_NAME=nlp_raw
-CLEAN_DB_NAME=nlp_clean
-CLASSIFIED_DB_NAME=nlp_classified
-MODELS_DB_NAME=nlp_models
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
+| `KAGGLE_ENABLED` | `true` | Download and ingest Kaggle dataset on first boot |
+| `KAGGLE_KEY` | _(empty)_ | Kaggle API key (modern tokens only) |
+| `SKIP_BOOTSTRAP` | `false` | Skip dataset bootstrap entirely (set `true` after first run) |
+| `LOG_LEVEL` | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
-# Logging
-LOG_LEVEL=INFO
-PYTHONUNBUFFERED=1
+See `.env.example` for the full list including database names, collection names, and scheduler settings.
 
-# Scraper configuration (in config/settings.py)
-SCRAPE_HOUR=0  # UTC hour for daily scrape (0-23)
-```
+---
 
-## Database Schema
-
-### Raw Collection (`nlp_raw.articles`)
-
-Stores articles exactly as scraped from RSS feeds.
-
-```javascript
-{
-  _id: ObjectId,
-  url: String,           // Unique
-  title: String,
-  feed: String,
-  type: String|null,     // e.g., "news", "opinion"
-  pub: String|null,      // ISO-8601 publication date
-  ret: String|null,      // ISO-8601 retrieval date
-  lang: String|null,     // BCP-47 language code
-  body: String,
-  text: String|null,     // Full raw page text
-  refs: [String]|null,   // Referenced URLs
-  sum: String|null,      // Summary/lede
-  rank: 0|1|2|null       // Quality rank (0=complete, 1=incomplete, 2=discard)
-}
-```
-
-Indexes:
-- `url` (unique)
-- `rank` (fast filtering)
-- `feed` (sector queries)
-- `pub` (date-based sorting)
-
-### Clean Collection (`nlp_clean.articles`)
-
-Stores rank-0 articles ready for NLP processing.
-
-Same schema as raw, no rank field (all are quality-verified).
-
-### Classified Collection (`nlp_classified.articles`) — Phase 3
-
-Extends clean schema with:
-- `category: String` — Primary classification
-- `subcategory: String|null`
-- `confidence: Float` — Classification confidence (0-1)
-- `entities: [Object]` — Named entities (NER)
-- `keywords: [String]` — Extracted keywords
-- `sentiment: Float|null` — Sentiment score (-1 to 1)
-
-### Models Database (`nlp_models.model_runs`)
-
-Stores evaluation results:
-
-```javascript
-{
-  _id: ObjectId,
-  model_version: String,         // e.g., "v0.1.0-20260323"
-  metrics: {
-    precision: Float,
-    recall: Float,
-    f1: Float,
-    per_category: Object         // Breakdown by category
-  },
-  created_at: String,            // ISO-8601 timestamp
-  hyperparams: Object|null,      // Model configuration
-  training_set_size: Int|null    // Training examples
-}
-```
-
-## Development Workflow
-
-### Local Testing
+## Development
 
 ```bash
-# Run all services
-docker-compose up -d
+# Follow logs
+docker compose logs -f api
+docker compose logs -f jobs
 
-# Run a specific job
-docker-compose exec jobs python scripts/run_job.py scrape
-
-# Check logs
-docker-compose logs -f jobs
+# Rebuild after code changes
+docker compose up --build -d
 
 # Stop all services
-docker-compose down
+docker compose down
+
+# Stop and wipe volumes (full reset)
+docker compose down --volumes
 ```
 
-### Data Inspection
+### Project structure
 
-```bash
-# Count raw articles
-docker-compose exec jobs python3 -c "
-from database.repositories import get_raw_collection
-col = get_raw_collection()
-print(f'Raw: {col.count_documents({})}')
-print(f'  Rank 0: {col.count_documents({\"rank\": 0})}')
-print(f'  Rank 1: {col.count_documents({\"rank\": 1})}')
-print(f'  Rank 2: {col.count_documents({\"rank\": 2})}')
-"
 ```
+src/
+  web/          FastAPI app and endpoints
+  jobs/         Job orchestration (scrape, clean, ner, evaluate)
+  scraper/      RSS feed collection
+  cleaning/     Quality filtering and ranking
+  database/     MongoDB connection, models, repositories
+  modelling/    ML model wrappers
+  evaluation/   Metric computation
 
-### Adding New RSS Feeds
-
-Edit `config/settings.py`:
-
-```python
-RSS_FEEDS: list[dict[str, Any]] = field(default_factory=lambda: [
-    {
-        "name": "Your Feed Name",
-        "url": "https://example.com/feed.xml",
-        "lang": "en",
-    },
-    # ... existing feeds
-])
+config/         Environment-driven settings (settings.py)
+scripts/        run_job.py, db_dump.sh, db_restore.sh
+frontend/       React/Vite app
 ```
-
-No Python code changes needed! Restart the jobs container.
-
-## Phases
-
-| Phase | Status | Components | Est. Effort |
-|-------|--------|------------|------------|
-| 1 | ✅ Done | Docker setup, MongoDB, DB init | - |
-| 2 | ✅ Done | Job architecture, CLI runner | - |
-| 3 | 🔄 In Progress | Classifier, feature extraction | 1-2 weeks |
-| 4 | ⏳ Planned | Evaluation, model metrics | 1 week |
-| 5 | ⏳ Planned | REST API implementation | 1-2 weeks |
-| 6 | ⏳ Future | Kubernetes, orchestration | 2-3 weeks |
-
-## Troubleshooting
-
-### MongoDB won't start
-
-```bash
-# Check logs
-docker-compose logs mongodb
-
-# Verify health
-docker-compose exec -T mongodb python3 -c "import socket; socket.create_connection(('localhost', 27017)); print('OK')"
-```
-
-### API not responding
-
-```bash
-# Check if running
-docker-compose ps api
-
-# Check logs
-docker-compose logs api
-
-# Test endpoint
-curl http://localhost:8000/health
-```
-
-### Jobs fail silently
-
-```bash
-# Run with verbose output
-docker-compose exec jobs python scripts/run_job.py scrape --json
-
-# Check logs
-docker-compose logs jobs | tail -50
-```
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for production troubleshooting.
-
-## Contributing
-
-- Follow PEP 8 style guide
-- Add unit tests for new features
-- Document API endpoints
-- Update this README for structural changes
-
-## License
-
-See [LICENSE](LICENSE)
