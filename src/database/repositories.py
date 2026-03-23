@@ -149,6 +149,27 @@ def update_raw_rank(url: str, rank: int, reasons: list[str] | None = None) -> No
     get_raw_collection().update_one({"url": url}, {"$set": payload})
 
 
+def bulk_update_raw_ranks(updates: list[tuple[str, int, list[str] | None]]) -> None:
+    """Batch-update ranks for multiple articles in a single bulk_write call.
+
+    Parameters
+    ----------
+    updates : list of (url, rank, reasons)
+    """
+    if not updates:
+        return
+    ops = []
+    for url, rank, reasons in updates:
+        payload: dict[str, Any] = {"rank": rank}
+        if reasons is not None:
+            payload["rank_reasons"] = reasons
+        ops.append(UpdateOne({"url": url}, {"$set": payload}))
+    try:
+        get_raw_collection().bulk_write(ops, ordered=False)
+    except BulkWriteError as exc:
+        logger.warning("Bulk rank update partial error: %s", exc.details)
+
+
 def update_raw_article_fields(url: str, fields: dict[str, Any]) -> None:
     """Patch missing fields on a rank-1 article after URL re-fetch."""
     get_raw_collection().update_one({"url": url}, {"$set": fields})

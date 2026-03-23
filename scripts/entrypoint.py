@@ -22,6 +22,24 @@ import sys
 import time
 from datetime import datetime
 
+# ANSI colours
+_GREEN  = "\033[0;32m"
+_RED    = "\033[0;31m"
+_YELLOW = "\033[1;33m"
+_CYAN   = "\033[0;36m"
+_BOLD   = "\033[1m"
+_RESET  = "\033[0m"
+
+OK   = f"{_GREEN}[ OK ]{_RESET}"
+FAIL = f"{_RED}[FAIL]{_RESET}"
+INFO = f"{_CYAN}[INFO]{_RESET}"
+WARN = f"{_YELLOW}[WARN]{_RESET}"
+
+
+def _status(tag: str, msg: str) -> None:
+    print(f"  {tag} {msg}", flush=True)
+
+
 # Configure logging early
 logging.basicConfig(
     level=logging.INFO,
@@ -133,42 +151,34 @@ def bootstrap_from_kaggle() -> bool:
         )
         return True  # Not an error, just skip
 
-    logger.info("Starting Kaggle dataset bootstrap...")
+    _status(INFO, f"Downloading dataset: {settings.KAGGLE_DATASET}...")
 
     try:
-        # Download and ingest dataset
         ingestion_result = ingest_kaggle_dataset()
 
         if ingestion_result["status"] != "success":
-            logger.error("Kaggle ingestion failed: %s", ingestion_result["errors"])
+            _status(FAIL, f"Kaggle ingestion failed: {ingestion_result['errors']}")
             return False
 
-        # Sum all inserted documents (articles + entities + sentences)
-        total_inserted = (
-            ingestion_result.get("inserted_articles", 0)
-            + ingestion_result.get("inserted_entities", 0)
-            + ingestion_result.get("inserted_sentences", 0)
-        )
+        articles  = ingestion_result.get("inserted_articles", 0)
+        entities  = ingestion_result.get("inserted_entities", 0)
+        sentences = ingestion_result.get("inserted_sentences", 0)
+        total_inserted = articles + entities + sentences
 
-        logger.info(
-            "✓ Ingestion complete: " "articles=%d, entities=%d, sentences=%d",
-            ingestion_result.get("inserted_articles", 0),
-            ingestion_result.get("inserted_entities", 0),
-            ingestion_result.get("inserted_sentences", 0),
-        )
+        _status(OK, f"Ingested  articles={articles}  entities={entities}  sentences={sentences}")
 
         if total_inserted == 0:
-            logger.warning("No documents were inserted; skipping cleaning pipeline")
+            _status(WARN, "No documents inserted — skipping cleaning pipeline")
             return True
 
-        # Run cleaning pipeline on newly ingested articles
-        logger.info("Running cleaning pipeline on ingested articles...")
+        _status(INFO, "Running cleaning pipeline...")
         clean_result = run_cleaning_pipeline(skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY)
-        logger.info("Cleaning complete: %s", clean_result)
+        _status(OK, f"Cleaning done  promoted={clean_result.get('promoted', 0)}  discarded={clean_result.get('discarded', 0)}")
 
         return True
 
     except Exception as e:
+        _status(FAIL, f"Bootstrap exception: {e}")
         logger.exception("Bootstrap failed")
         return False
 
@@ -195,40 +205,40 @@ def run_entrypoint_sequence(skip_bootstrap: bool = False) -> int:
     """
     Execute the full initialization sequence.
     """
-    logger.info("=== NLP Article Analyzer - Container Startup ===")
-    logger.info("Start time: %s", datetime.now().isoformat())
+    print(f"\n{_BOLD}NLP Article Analyzer{_RESET}", flush=True)
+    print(f"  Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n", flush=True)
 
     # Step 1: Wait for MongoDB
-    logger.info("\n[1/4] Waiting for MongoDB...")
+    _status(INFO, "Waiting for MongoDB...")
     if not wait_for_mongodb():
-        logger.error("MongoDB not available. Aborting.")
+        _status(FAIL, "MongoDB not available")
         return 1
+    _status(OK, "MongoDB connected")
 
     if skip_bootstrap:
-        logger.info("Skipping heavy initialization (bootstrap/schema check)")
+        _status(INFO, "Skipping bootstrap (SKIP_BOOTSTRAP=true)")
         return 0
 
     # Step 2: Initialize database schemas
-    logger.info("\n[2/4] Initializing databases...")
+    _status(INFO, "Initializing databases...")
     if not initialize_databases():
-        logger.error("Database initialization failed. Aborting.")
+        _status(FAIL, "Database initialization failed")
         return 1
+    _status(OK, "Databases initialized")
 
     # Step 3: Check if bootstrap needed
-    logger.info("\n[3/4] Checking if bootstrap required...")
+    _status(INFO, "Checking if bootstrap required...")
     if is_database_empty():
-        logger.info("Database empty. Attempting bootstrap...")
+        _status(INFO, "Fresh install — running Kaggle bootstrap...")
         if not bootstrap_from_kaggle():
-            logger.error("Bootstrap failed. Aborting.")
+            _status(FAIL, "Bootstrap failed")
             return 1
+        _status(OK, "Bootstrap complete")
     else:
-        logger.info("Database already populated. Skipping bootstrap.")
+        _status(OK, "Database already populated — skipping bootstrap")
 
-    # Step 4: Ready to start service
-    logger.info("\n[4/4] Ready to start service...")
-    logger.info("Initialization complete")
-    logger.info("=== Startup sequence finished ===\n")
-
+    print("", flush=True)
+    _status(OK, "Initialization complete — ready\n")
     return 0
 
 

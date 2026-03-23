@@ -22,6 +22,7 @@ from typing import Any
 from tqdm import tqdm
 
 from database.repositories import (
+    bulk_update_raw_ranks,
     count_raw_articles_by_rank,
     get_raw_articles_by_rank,
     upsert_quarantine_articles,
@@ -48,10 +49,11 @@ def _rank_unranked_articles() -> None:
         return
 
     logger.info("Ranking %d unranked articles…", len(unranked))
-    for article in tqdm(unranked, desc="Ranking", unit="art"):
+    updates = []
+    for article in tqdm(unranked, desc="  Ranking", unit="art", ncols=80):
         rank, reasons = rank_article_with_reasons(article)
-        update_raw_rank(article["url"], rank, reasons)
-
+        updates.append((article["url"], rank, reasons))
+    bulk_update_raw_ranks(updates)
     logger.info("Ranking complete.")
 
 
@@ -68,11 +70,11 @@ def _process_rank1() -> None:
     logger.info("Attempting to recover %d Rank-1 articles…", len(rank1_articles))
     promoted = 0
 
-    for article in tqdm(rank1_articles, desc="Recovering rank-1", unit="art"):
+    rank_updates = []
+    for article in tqdm(rank1_articles, desc="  Recovering rank-1", unit="art", ncols=80):
         patched = fill_missing_fields(article)
         new_rank, reasons = rank_article_with_reasons(patched)
 
-        # Persist any newly filled fields back to raw
         changed_fields = {
             k: patched[k]
             for k in patched
@@ -81,12 +83,12 @@ def _process_rank1() -> None:
         if changed_fields:
             update_raw_article_fields(article["url"], changed_fields)
 
-        update_raw_rank(article["url"], new_rank, reasons)
+        rank_updates.append((article["url"], new_rank, reasons))
 
         if new_rank == 0:
             promoted += 1
-        elif new_rank == 2:
-            logger.warning("Article demoted to Rank 2 after re-fetch: %s", article["url"])
+
+    bulk_update_raw_ranks(rank_updates)
 
     logger.info("Rank-1 processing done: %d articles promoted to Rank 0.", promoted)
 
