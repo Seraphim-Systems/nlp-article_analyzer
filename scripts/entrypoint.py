@@ -40,6 +40,66 @@ def _status(tag: str, msg: str) -> None:
     print(f"  {tag} {msg}", flush=True)
 
 
+def _print_stack_ready(service: str) -> None:
+    """Print the post-init stack summary banner."""
+    sep = f"{_CYAN}{'─' * 62}{_RESET}"
+
+    print(f"\n{_BOLD}{_GREEN}{'━' * 62}{_RESET}", flush=True)
+    print(f"{_BOLD}  NLP Article Analyzer — Stack Ready{_RESET}", flush=True)
+    print(f"{_BOLD}{_GREEN}{'━' * 62}{_RESET}\n", flush=True)
+
+    print(f"  {_BOLD}Services{_RESET}", flush=True)
+    print(f"  {sep}", flush=True)
+    print(f"  API          {_CYAN}http://localhost:8000{_RESET}", flush=True)
+    print(f"  Docs         {_CYAN}http://localhost:8000/docs{_RESET}", flush=True)
+    print(f"  Frontend     {_CYAN}http://localhost:5173{_RESET}", flush=True)
+    print(f"  MongoDB      {_CYAN}mongodb://localhost:27017{_RESET}", flush=True)
+
+    print(f"\n  {_BOLD}API Endpoints{_RESET}", flush=True)
+    print(f"  {sep}", flush=True)
+    endpoints = [
+        ("GET",  "/",                        "API info"),
+        ("GET",  "/health",                  "Full stack health + collection counts"),
+        ("GET",  "/stats",                   "Collection sizes by pipeline stage"),
+        ("GET",  "/articles",                "Paginated articles (?collection=clean|ner&search=)"),
+        ("GET",  "/articles/ner/{url_b64}",  "Full NER detail by base64-encoded URL"),
+        ("GET",  "/compare/tfidf",           "TF-IDF: clean text vs NER-enhanced (?sample_size=200)"),
+        ("POST", "/jobs/trigger",            "Trigger a pipeline job (scrape|clean|ner|evaluate)"),
+        ("GET",  "/jobs/{id}",               "Poll job status by ID"),
+        ("GET",  "/jobs",                    "List all tracked jobs"),
+        ("GET",  "/metrics",                 "Model performance metrics (stub)"),
+    ]
+    for method, path, desc in endpoints:
+        colour = _GREEN if method == "GET" else _YELLOW
+        print(f"  {colour}{method:<5}{_RESET}  {_BOLD}{path:<36}{_RESET}  {desc}", flush=True)
+
+    print(f"\n  {_BOLD}Useful Commands{_RESET}", flush=True)
+    print(f"  {sep}", flush=True)
+    cmds = [
+        ("Run NER job natively (MPS/GPU/CPU):",
+         "PYTHONPATH=src:. .venv/bin/python scripts/run_job.py ner"),
+        ("Run any job in Docker:",
+         "docker compose exec jobs python scripts/run_job.py {scrape|clean|ner|evaluate}"),
+        ("Export MongoDB snapshot:",
+         "./scripts/db_dump.sh"),
+        ("Import MongoDB snapshot:",
+         "./scripts/db_restore.sh ~/Downloads/nlp_mongo_dump_YYYYMMDD.tar.gz"),
+        ("Follow API logs:",
+         "docker compose logs -f api"),
+        ("Follow job logs:",
+         "docker compose logs -f jobs"),
+        ("Rebuild and restart:",
+         "docker compose up --build -d"),
+        ("Stop stack (keep data):",
+         "docker compose down"),
+    ]
+    for label, cmd in cmds:
+        print(f"  {_YELLOW}{label}{_RESET}", flush=True)
+        print(f"    {cmd}\n", flush=True)
+
+    print(f"{_BOLD}{_GREEN}{'━' * 62}{_RESET}\n", flush=True)
+
+
 # Configure logging early
 logging.basicConfig(
     level=logging.INFO,
@@ -237,8 +297,7 @@ def run_entrypoint_sequence(skip_bootstrap: bool = False) -> int:
     else:
         _status(OK, "Database already populated — skipping bootstrap")
 
-    print("", flush=True)
-    _status(OK, "Initialization complete — ready\n")
+    _status(OK, "Initialization complete")
     return 0
 
 
@@ -246,6 +305,14 @@ def main() -> int:
     """
     Main entrypoint.
     """
+    # Validate environment before doing anything
+    try:
+        from config.settings import settings
+        settings.validate()
+    except EnvironmentError as e:
+        print(f"\n  {FAIL} Configuration error:\n    {e}\n", flush=True)
+        return 1
+
     args = sys.argv[1:] if len(sys.argv) > 1 else ["api"]
     service_arg = args[0] if args else "api"
 
@@ -259,6 +326,8 @@ def main() -> int:
     init_result = run_entrypoint_sequence(skip_bootstrap=skip_heavy)
     if init_result != 0:
         return init_result
+
+    _print_stack_ready(service_arg)
 
     # Start the requested service
     logger.info("Starting service: %s", service_arg)
