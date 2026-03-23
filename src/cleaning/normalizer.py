@@ -58,7 +58,10 @@ def compute_document_stats(text: str) -> DocumentStats:
 def extract_url_tags(urls: list[str]) -> list[dict[str, str]]:
     tags: list[dict[str, str]] = []
     for u in urls:
-        parsed = urlparse(u)
+        try:
+            parsed = urlparse(u)
+        except ValueError:
+            continue
         if not parsed.netloc:
             continue
         host = parsed.netloc.lower()

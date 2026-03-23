@@ -238,6 +238,9 @@ def _parse_kaggle_files(
     - relevant_entities.json: named entities
     - relevant_sent.json or sentences_matched_entities.json: sentences
 
+    Prioritises relevant_articles.json for article ingestion; falls back to
+    all JSON files in the directory if it is absent.
+
     Returns tuple of (articles, entities, sentences) lists.
     """
     articles: list[dict[str, Any]] = []
@@ -246,20 +249,20 @@ def _parse_kaggle_files(
 
     dataset_dir = Path(dataset_path)
 
-    # Search for JSON files only (enforcing JSON extraction)
-    json_files = list(dataset_dir.glob("*.json"))
+    # Use relevant_articles.json as the primary source; fall back to any JSON
+    target = dataset_dir / "relevant_articles.json"
+    json_files = [target] if target.exists() else list(dataset_dir.glob("*.json"))
 
     if not json_files:
         logger.warning("No JSON files found in %s", dataset_path)
         return articles, entities, sentences
 
-    logger.info("Found %d JSON files", len(json_files))
+    logger.info("Found %d JSON file(s) to parse", len(json_files))
 
     for json_file in json_files:
         logger.info("Parsing %s", json_file.name)
-
         try:
-            # Try standard JSON first
+            # Try standard JSON first, fall back to JSONL (line-by-line)
             with open(json_file, encoding="utf-8") as f:
                 try:
                     data = json.load(f)
@@ -270,7 +273,6 @@ def _parse_kaggle_files(
                     else:
                         records = []
                 except json.JSONDecodeError:
-                    # If standard JSON fails, try JSONL (line-by-line)
                     f.seek(0)
                     records = []
                     for line in f:
@@ -279,7 +281,7 @@ def _parse_kaggle_files(
                                 records.append(json.loads(line))
                             except json.JSONDecodeError:
                                 continue
-            
+
             if not records:
                 continue
 
@@ -288,23 +290,18 @@ def _parse_kaggle_files(
                 if not isinstance(record, dict):
                     continue
 
-                # Articles usually have 'title' and ('url' or 'text' or '_id')
+                # Articles: have 'title' and ('url' or 'text' or '_id')
                 if "title" in record and ("text" in record or "url" in record or "_id" in record):
-                    # Article record
                     article = _parse_article_record(record)
                     if article:
                         articles.append(article)
 
                 elif "NE" in record and ("docID" in record or "doc_id" in record):
-                    # Entity record
                     entity = _parse_entity_record(record)
                     if entity:
                         entities.append(entity)
 
-                elif (
-                    "text" in record and "docID" in record and "senDocID" in record
-                ):
-                    # Sentence record
+                elif "text" in record and "docID" in record and "senDocID" in record:
                     sentence = _parse_sentence_record(record)
                     if sentence:
                         sentences.append(sentence)
@@ -322,27 +319,36 @@ def _parse_kaggle_files(
 
 
 def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
-    """Parse article from JSON record (new format)."""
+    """
+    Convert a julianschelb/newsdata JSON record to our article schema.
+
+    Handles both legacy format (_id, url, title, feed, body, pub as $date object)
+    and modern format (url/id, title, text/content, publishedAt as ISO string).
+    """
     try:
         # Robust URL and Title extraction
         url = str(record.get("url") or record.get("_id") or "").strip()
-        title = record.get("title", "").strip()
-        body = record.get("text", record.get("content", "")).strip()
+        title = (record.get("title") or "").strip()
+        body = (record.get("body") or record.get("text") or record.get("content") or "").strip()
 
         if not title or not body:
             return None
 
-        # Publication date
-        pub_date = record.get("pub", record.get("publishedAt", "")).strip()
-        if pub_date:
+        def _extract_date(val: Any) -> str | None:
+            if not val:
+                return None
+            if isinstance(val, dict):
+                val = val.get("$date", "")
             try:
-                pub_date = datetime.fromisoformat(
-                    pub_date.replace("Z", "+00:00")
+                return datetime.fromisoformat(
+                    str(val).replace("Z", "+00:00")
                 ).isoformat()
             except (ValueError, AttributeError):
-                pub_date = None
+                return None
 
-        ret_date = datetime.now(timezone.utc).isoformat()
+        # Publication date — support both legacy $date objects and plain ISO strings
+        pub_date = _extract_date(record.get("pub") or record.get("publishedAt"))
+        ret_date = _extract_date(record.get("ret")) or datetime.now(timezone.utc).isoformat()
 
         # Capture Kaggle internal ID for potential joins
         kaggle_id = record.get("_id") or record.get("id")
@@ -350,15 +356,15 @@ def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
         return {
             "url": url,
             "title": title,
-            "feed": record.get("feed", "Kaggle Dataset").strip(),
-            "type": record.get("type", "news").strip(),
+            "feed": (record.get("feed") or "Kaggle Dataset").strip(),
+            "type": (record.get("type") or "news").strip(),
             "pub": pub_date,
             "ret": ret_date,
-            "lang": record.get("lang", "en").strip(),
+            "lang": (record.get("lang") or "en").strip(),
             "body": body,
-            "text": body,  # using body as text if text field is same
-            "refs": record.get("refs", []),
-            "sum": record.get("sum", "").strip(),
+            "text": (record.get("text") or body).strip(),
+            "refs": record.get("refs") or [],
+            "sum": (record.get("sum") or "").strip(),
             "kaggle_id": kaggle_id,
             "rank": None,
         }

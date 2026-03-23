@@ -24,6 +24,8 @@
 version: "3.9"
 
 volumes:
+  hf_cache_prod:
+    driver: local
   mongo_data_prod:
     driver: local
     driver_opts:
@@ -90,6 +92,8 @@ services:
       CLEAN_DB_NAME: nlp_clean
       CLASSIFIED_DB_NAME: nlp_classified
       MODELS_DB_NAME: nlp_models
+      NER_DB_NAME: nlp_ner
+      NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       # Kaggle bootstrap (set in .env if needed)
@@ -98,14 +102,16 @@ services:
     # Entrypoint handles init + bootstrap, then waits for scheduled job execution
     # (orchestrated externally via cron/K8s CronJob or manual CLI)
     command: wait
+    volumes:
+      - hf_cache_prod:/root/.cache/huggingface
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 2G
+          cpus: '2'
+          memory: 4G
         reservations:
           cpus: '0.5'
-          memory: 1G
+          memory: 2G
     logging:
       driver: "json-file"
       options:
@@ -133,6 +139,8 @@ services:
       CLEAN_DB_NAME: nlp_clean
       CLASSIFIED_DB_NAME: nlp_classified
       MODELS_DB_NAME: nlp_models
+      NER_DB_NAME: nlp_ner
+      NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       # Kaggle bootstrap (disabled in production after initial setup)

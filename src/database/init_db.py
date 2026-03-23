@@ -14,11 +14,13 @@ from pymongo import MongoClient
 from pymongo.database import Database
 
 from config.settings import settings
-from database.connection import get_client, get_raw_db, get_clean_db
+from database.connection import get_client, get_raw_db, get_clean_db, get_ner_db
 from database.models import (
     ARTICLE_VALIDATOR,
     RAW_INDEXES,
     CLEAN_INDEXES,
+    NER_ARTICLE_VALIDATOR,
+    NER_INDEXES,
     ENTITY_VALIDATOR,
     ENTITY_INDEXES,
     SENTENCE_VALIDATOR,
@@ -147,6 +149,15 @@ def init_databases() -> None:
                 "options": {"name": "created_at_idx"},
             },
         ],
+    )
+
+    # NER articles database
+    ner_db = get_ner_db()
+    _ensure_collection(
+        ner_db,
+        settings.NER_COLLECTION,
+        NER_ARTICLE_VALIDATOR,
+        NER_INDEXES,
     )
 
     logger.info("Database initialization complete.")

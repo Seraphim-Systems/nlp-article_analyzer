@@ -49,7 +49,7 @@ Examples:
         "job",
         nargs="?",
         default="scrape",
-        choices=["scrape", "clean", "classify", "evaluate"],
+        choices=["scrape", "clean", "classify", "ner", "evaluate"],
         help="Job to run (default: scrape)",
     )
 

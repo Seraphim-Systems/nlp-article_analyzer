@@ -149,6 +149,44 @@ CLEAN_INDEXES = [
 ]
 
 
+NER_ARTICLE_VALIDATOR: dict[str, Any] = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["url", "title", "feed", "body", "entities"],
+        "properties": {
+            "url":   {"bsonType": "string"},
+            "title": {"bsonType": "string"},
+            "feed":  {"bsonType": "string"},
+            "body":  {"bsonType": "string"},
+            "entities": {
+                "bsonType": "array",
+                "items": {
+                    "bsonType": "object",
+                    "required": ["text", "label", "start", "end"],
+                    "properties": {
+                        "text":  {"bsonType": "string"},
+                        "label": {"bsonType": "string"},
+                        "start": {"bsonType": "int"},
+                        "end":   {"bsonType": "int"},
+                    },
+                },
+            },
+            "type":  {"bsonType": ["string", "null"]},
+            "pub":   {"bsonType": ["string", "null"]},
+            "ret":   {"bsonType": ["string", "null"]},
+            "lang":  {"bsonType": ["string", "null"]},
+            "sum":   {"bsonType": ["string", "null"]},
+        },
+    }
+}
+
+NER_INDEXES = [
+    {"keys": [("url", 1)], "options": {"unique": True, "name": "url_unique"}},
+    {"keys": [("feed", 1)], "options": {"name": "feed_idx"}},
+    {"keys": [("pub", -1)], "options": {"name": "pub_date_idx"}},
+]
+
+
 def build_article_dict(
     *,
     url: str,

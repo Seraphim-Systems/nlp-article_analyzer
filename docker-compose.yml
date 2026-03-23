@@ -19,6 +19,8 @@
 volumes:
   mongo_data:
     driver: local
+  hf_cache:
+    driver: local
 
 services:
   # ── MongoDB database (containerized local instance) ─────────────────────
@@ -66,18 +68,26 @@ services:
       CLEAN_DB_NAME: nlp_clean
       CLASSIFIED_DB_NAME: nlp_classified
       MODELS_DB_NAME: nlp_models
+      NER_DB_NAME: nlp_ner
+      NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+      KAGGLE_KEY: ${KAGGLE_KEY}
       SKIP_BOOTSTRAP: "false"
+      SKIP_RANK1_RECOVERY: "true"
       RUN_CLEAN_AFTER_SCRAPE: "true"
       ENGLISH_ONLY: "true"
-    # Entrypoint handles init + bootstrap, CMD specifies which job to run
-    command: job scrape
+    # Entrypoint handles init + bootstrap, then waits for manual job execution
+    # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
+    # Or schedule via cron using orchestrate_jobs.sh
+    command: wait
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
       - ./config:/app/config
+      - hf_cache:/root/.cache/huggingface
     logging:
       driver: "json-file"
       options:
@@ -105,6 +115,8 @@ services:
       CLEAN_DB_NAME: nlp_clean
       CLASSIFIED_DB_NAME: nlp_classified
       MODELS_DB_NAME: nlp_models
+      NER_DB_NAME: nlp_ner
+      NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
@@ -115,6 +127,7 @@ services:
       - ./src:/app/src
       - ./scripts:/app/scripts
       - ./config:/app/config
+      - hf_cache:/root/.cache/huggingface
     logging:
       driver: "json-file"
       options:

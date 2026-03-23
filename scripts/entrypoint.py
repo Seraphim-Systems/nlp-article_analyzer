@@ -22,6 +22,24 @@ import sys
 import time
 from datetime import datetime
 
+# ANSI colours
+_GREEN  = "\033[0;32m"
+_RED    = "\033[0;31m"
+_YELLOW = "\033[1;33m"
+_CYAN   = "\033[0;36m"
+_BOLD   = "\033[1m"
+_RESET  = "\033[0m"
+
+OK   = f"{_GREEN}[ OK ]{_RESET}"
+FAIL = f"{_RED}[FAIL]{_RESET}"
+INFO = f"{_CYAN}[INFO]{_RESET}"
+WARN = f"{_YELLOW}[WARN]{_RESET}"
+
+
+def _status(tag: str, msg: str) -> None:
+    print(f"  {tag} {msg}", flush=True)
+
+
 # Configure logging early
 logging.basicConfig(
     level=logging.INFO,
@@ -52,16 +70,16 @@ def wait_for_mongodb(max_retries: int = 30, retry_delay: int = 2) -> bool:
     for attempt in range(max_retries):
         try:
             logger.info(
-                "Connecting to MongoDB (attempt %d/%d)…", attempt + 1, max_retries
+                "Connecting to MongoDB (attempt %d/%d)...", attempt + 1, max_retries
             )
             client = get_client()
             client.admin.command("ping")
-            logger.info("✓ MongoDB connection established")
+            logger.info("MongoDB connection established")
             return True
         except Exception as e:
             if attempt < max_retries - 1:
                 logger.warning(
-                    "Connection failed: %s. Retrying in %ds…", e, retry_delay
+                    "Connection failed: %s. Retrying in %ds...", e, retry_delay
                 )
                 time.sleep(retry_delay)
             else:
@@ -87,6 +105,7 @@ def is_database_empty() -> bool:
         settings.CLEAN_DB_NAME,
         settings.CLASSIFIED_DB_NAME,
         settings.MODELS_DB_NAME,
+        settings.NER_DB_NAME,
     ]
 
     for db_name in dbs:
@@ -132,42 +151,34 @@ def bootstrap_from_kaggle() -> bool:
         )
         return True  # Not an error, just skip
 
-    logger.info("Starting Kaggle dataset bootstrap…")
+    _status(INFO, f"Downloading dataset: {settings.KAGGLE_DATASET}...")
 
     try:
-        # Download and ingest dataset
         ingestion_result = ingest_kaggle_dataset()
 
         if ingestion_result["status"] != "success":
-            logger.error("Kaggle ingestion failed: %s", ingestion_result["errors"])
+            _status(FAIL, f"Kaggle ingestion failed: {ingestion_result['errors']}")
             return False
 
-        # Sum all inserted documents (articles + entities + sentences)
-        total_inserted = (
-            ingestion_result.get("inserted_articles", 0)
-            + ingestion_result.get("inserted_entities", 0)
-            + ingestion_result.get("inserted_sentences", 0)
-        )
+        articles  = ingestion_result.get("inserted_articles", 0)
+        entities  = ingestion_result.get("inserted_entities", 0)
+        sentences = ingestion_result.get("inserted_sentences", 0)
+        total_inserted = articles + entities + sentences
 
-        logger.info(
-            "✓ Ingestion complete: " "articles=%d, entities=%d, sentences=%d",
-            ingestion_result.get("inserted_articles", 0),
-            ingestion_result.get("inserted_entities", 0),
-            ingestion_result.get("inserted_sentences", 0),
-        )
+        _status(OK, f"Ingested  articles={articles}  entities={entities}  sentences={sentences}")
 
         if total_inserted == 0:
-            logger.warning("No documents were inserted; skipping cleaning pipeline")
+            _status(WARN, "No documents inserted — skipping cleaning pipeline")
             return True
 
-        # Run cleaning pipeline on newly ingested articles
-        logger.info("Running cleaning pipeline on ingested articles…")
-        clean_result = run_cleaning_pipeline()
-        logger.info("✓ Cleaning complete: %s", clean_result)
+        _status(INFO, "Running cleaning pipeline...")
+        clean_result = run_cleaning_pipeline(skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY)
+        _status(OK, f"Cleaning done  promoted={clean_result.get('promoted', 0)}  discarded={clean_result.get('discarded', 0)}")
 
         return True
 
     except Exception as e:
+        _status(FAIL, f"Bootstrap exception: {e}")
         logger.exception("Bootstrap failed")
         return False
 
@@ -181,9 +192,9 @@ def initialize_databases() -> bool:
     try:
         from database.init_db import init_databases
 
-        logger.info("Initializing databases…")
+        logger.info("Initializing databases...")
         init_databases()
-        logger.info("✓ Databases initialized")
+        logger.info("Databases initialized")
         return True
     except Exception as e:
         logger.exception("Database initialization failed")
@@ -194,27 +205,40 @@ def run_entrypoint_sequence(skip_bootstrap: bool = False) -> int:
     """
     Execute the full initialization sequence.
     """
-    logger.info("=== NLP Article Analyzer - Initialization ===")
-    
-    # Step 1: Wait for MongoDB (everyone needs this)
+    print(f"\n{_BOLD}NLP Article Analyzer{_RESET}", flush=True)
+    print(f"  Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n", flush=True)
+
+    # Step 1: Wait for MongoDB
+    _status(INFO, "Waiting for MongoDB...")
     if not wait_for_mongodb():
+        _status(FAIL, "MongoDB not available")
         return 1
+    _status(OK, "MongoDB connected")
 
     if skip_bootstrap:
-        logger.info("Skipping heavy initialization (bootstrap/schema check)")
+        _status(INFO, "Skipping bootstrap (SKIP_BOOTSTRAP=true)")
         return 0
 
     # Step 2: Initialize database schemas
+    _status(INFO, "Initializing databases...")
     if not initialize_databases():
+        _status(FAIL, "Database initialization failed")
         return 1
+    _status(OK, "Databases initialized")
 
     # Step 3: Check if bootstrap needed
+    _status(INFO, "Checking if bootstrap required...")
     if is_database_empty():
+        _status(INFO, "Fresh install — running Kaggle bootstrap...")
         if not bootstrap_from_kaggle():
+            _status(FAIL, "Bootstrap failed")
             return 1
+        _status(OK, "Bootstrap complete")
     else:
-        logger.info("Database already populated. Skipping bootstrap.")
+        _status(OK, "Database already populated — skipping bootstrap")
 
+    print("", flush=True)
+    _status(OK, "Initialization complete — ready\n")
     return 0
 
 
@@ -278,7 +302,7 @@ def main() -> int:
             result = run_job(job_name)
             return 0 if result["status"] == "success" else 1
 
-        elif service_arg in ["scrape", "clean", "classify", "evaluate"]:
+        elif service_arg in ["scrape", "clean", "classify", "ner", "evaluate"]:
             # Run as job (backward compatible)
             from jobs import run_job
 
@@ -289,7 +313,7 @@ def main() -> int:
         else:
             logger.error("Unknown service: %s", service_arg)
             logger.error(
-                "Valid services: api, wait, job <job_name>, scrape, clean, classify, evaluate"
+                "Valid services: api, wait, job <job_name>, scrape, clean, classify, ner, evaluate"
             )
             return 1
 

@@ -74,6 +74,16 @@ class Settings:
         default_factory=lambda: _env("CLASSIFIED_COLLECTION", "articles")
     )
 
+    #: Name of the NER articles database
+    NER_DB_NAME: str = field(
+        default_factory=lambda: _env("NER_DB_NAME", "nlp_ner")
+    )
+
+    #: Collection name for NER-enriched articles
+    NER_COLLECTION: str = field(
+        default_factory=lambda: _env("NER_COLLECTION", "ner_articles")
+    )
+
     # ------------------------------------------------------------------
     # Scheduler
     # ------------------------------------------------------------------
@@ -173,6 +183,11 @@ class Settings:
     #: Skip bootstrap on container init (useful for production after initial run)
     SKIP_BOOTSTRAP: bool = field(
         default_factory=lambda: _env("SKIP_BOOTSTRAP", "false").lower() == "true"
+    )
+
+    #: Skip Rank-1 URL re-fetch during cleaning (useful for historical datasets with dead links)
+    SKIP_RANK1_RECOVERY: bool = field(
+        default_factory=lambda: _env("SKIP_RANK1_RECOVERY", "false").lower() == "true"
     )
 
 

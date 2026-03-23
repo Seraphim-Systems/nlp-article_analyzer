@@ -19,7 +19,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from tqdm import tqdm
+
 from database.repositories import (
+    bulk_update_raw_ranks,
     count_raw_articles_by_rank,
     get_raw_articles_by_rank,
     upsert_quarantine_articles,
@@ -46,10 +49,11 @@ def _rank_unranked_articles() -> None:
         return
 
     logger.info("Ranking %d unranked articles…", len(unranked))
-    for article in unranked:
+    updates = []
+    for article in tqdm(unranked, desc="  Ranking", unit="art", ncols=80):
         rank, reasons = rank_article_with_reasons(article)
-        update_raw_rank(article["url"], rank, reasons)
-
+        updates.append((article["url"], rank, reasons))
+    bulk_update_raw_ranks(updates)
     logger.info("Ranking complete.")
 
 
@@ -66,11 +70,11 @@ def _process_rank1() -> None:
     logger.info("Attempting to recover %d Rank-1 articles…", len(rank1_articles))
     promoted = 0
 
-    for article in rank1_articles:
+    rank_updates = []
+    for article in tqdm(rank1_articles, desc="  Recovering rank-1", unit="art", ncols=80):
         patched = fill_missing_fields(article)
         new_rank, reasons = rank_article_with_reasons(patched)
 
-        # Persist any newly filled fields back to raw
         changed_fields = {
             k: patched[k]
             for k in patched
@@ -79,12 +83,12 @@ def _process_rank1() -> None:
         if changed_fields:
             update_raw_article_fields(article["url"], changed_fields)
 
-        update_raw_rank(article["url"], new_rank, reasons)
+        rank_updates.append((article["url"], new_rank, reasons))
 
         if new_rank == 0:
             promoted += 1
-        elif new_rank == 2:
-            logger.warning("Article demoted to Rank 2 after re-fetch: %s", article["url"])
+
+    bulk_update_raw_ranks(rank_updates)
 
     logger.info("Rank-1 processing done: %d articles promoted to Rank 0.", promoted)
 
@@ -114,9 +118,15 @@ def _quarantine_rank2() -> int:
     return quarantined
 
 
-def run_cleaning_pipeline() -> dict[str, int]:
+def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
     """
     Execute the full cleaning pipeline.
+
+    Parameters
+    ----------
+    skip_rank1_recovery : bool
+        If True, skip the URL re-fetch step for Rank-1 articles.
+        Useful for large historical datasets where most URLs are dead.
 
     Returns a summary dict:
     {
@@ -130,8 +140,11 @@ def run_cleaning_pipeline() -> dict[str, int]:
     # Step 1: rank new articles
     _rank_unranked_articles()
 
-    # Step 2: try to recover rank-1
-    _process_rank1()
+    # Step 2: try to recover rank-1 (skippable)
+    if skip_rank1_recovery:
+        logger.info("Skipping Rank-1 URL recovery (skip_rank1_recovery=True)")
+    else:
+        _process_rank1()
 
     # Step 3: promote rank-0 to clean DB
     promoted = _promote_rank0_to_clean()
