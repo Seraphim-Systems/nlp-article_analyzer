@@ -18,17 +18,10 @@ pymongo==4.10.1
 # Scheduler
 schedule==1.2.2
 
-# NLP / preprocessing (for future phases)
-nltk==3.9.1
-spacy==3.8.3
-scikit-learn==1.6.1
-numpy==2.2.3
-pandas==2.2.3
+# Heavy ML libs are in requirements-heavy.txt (installed first in Docker)
 
-# NER / HuggingFace
-transformers==4.40.0
-accelerate==0.29.3
-torch==2.3.0
+# NLP utilities
+nltk==3.9.1
 
 # Testing
 pytest==8.3.5
