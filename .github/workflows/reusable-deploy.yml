@@ -1,0 +1,63 @@
+name: Reusable Deploy
+
+on:
+  workflow_call:
+    inputs:
+      deploy_path:
+        required: false
+        type: string
+        default: "~/nlp-project"
+      environment:
+        required: false
+        type: string
+        default: "production"
+    secrets:
+      server_ip:
+        required: true
+      server_user:
+        required: true
+      server_port:
+        required: false
+      SSH_PRIVATE_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Execute Remote SSH Commands
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.server_ip }}
+          username: ${{ secrets.server_user }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.server_port || '22' }}
+          script: |
+            # 1. Create/Navigate to deploy directory
+            mkdir -p ${{ inputs.deploy_path }}
+            cd ${{ inputs.deploy_path }}
+
+            # 2. Sync Repository
+            if [ ! -d ".git" ]; then
+              echo "Repository not found, cloning..."
+              git clone https://github.com/${{ github.repository }}.git .
+            else
+              echo "Repository exists, pulling latest changes..."
+              git fetch --all
+              git reset --hard origin/${{ github.ref_name }}
+            fi
+
+            # 3. Pull/Build and Start Services
+            if [ -f "docker-compose.prod.yml" ]; then
+              echo "Building and starting services using production config..."
+              docker compose -f docker-compose.prod.yml build
+              docker compose -f docker-compose.prod.yml up -d
+            else
+              echo "Production config not found, using default docker-compose..."
+              docker compose build
+              docker compose up -d
+            fi
+
+            # 4. Cleanup old images
+            docker image prune -f

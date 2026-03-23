@@ -162,6 +162,44 @@ print(f"Raw articles count: {col.count_documents({})}")
 EOF
 ```
 
+## CI/CD (GitHub Actions)
+
+The project includes GitHub Action workflows for automated deployment to a remote server (e.g., Hetzner).
+
+### Workflows
+
+1. **Reusable Deploy** (`.github/workflows/reusable-deploy.yml`)
+   - A base workflow that handles SSH connection, repository syncing, and Docker builds.
+   - Can be called by other workflows for different environments (staging, production).
+
+2. **Deploy to Production** (`.github/workflows/deploy-prod.yml`)
+   - Triggers on every push to the `main` branch.
+   - Calls the reusable workflow with production-specific parameters.
+
+### Required Secrets & Variables
+
+To enable automated deployment, configure the following in your GitHub repository settings (**Settings > Secrets and variables > Actions**):
+
+#### Secrets
+- `HETZNER_KEY`: Your SSH private key used to access the server.
+
+#### Variables
+- `HETZNER_IP`: The public IP address of your server.
+- `HETZNER_USER`: The SSH username (e.g., `root` or `deploy`).
+- `HETZNER_PORT`: (Optional) The SSH port. Defaults to `22`.
+
+### Deployment Flow
+
+1. Developer pushes code to the `main` branch.
+2. GitHub Actions triggers the "Deploy to Production" workflow.
+3. The workflow SSHs into the server using the provided credentials.
+4. It navigates to `~/nlp-project` (creates it if missing).
+5. It clones the repository or pulls the latest changes.
+6. It runs `docker compose -f docker-compose.prod.yml build` and `up -d`.
+7. It prunes old Docker images to save disk space.
+
+---
+
 ## Production Deployment
 
 ### Prerequisites
