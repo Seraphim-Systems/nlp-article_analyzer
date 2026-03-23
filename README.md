@@ -86,7 +86,7 @@ On first startup, the container can automatically download and ingest the Kaggle
 
 The seed will:
 - Download the [newsdata dataset](https://www.kaggle.com/datasets/julianschelb/newsdata)
-- Parse CSV files
+- Parse JSON files
 - Ingest articles into the raw collection
 - Run the cleaning pipeline automatically
 - Start the service

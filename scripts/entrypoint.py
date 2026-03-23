@@ -190,41 +190,30 @@ def initialize_databases() -> bool:
         return False
 
 
-def run_entrypoint_sequence() -> int:
+def run_entrypoint_sequence(skip_bootstrap: bool = False) -> int:
     """
     Execute the full initialization sequence.
-
-    Returns exit code.
     """
-    logger.info("=== NLP Article Analyzer - Container Startup ===")
-    logger.info("Start time: %s", datetime.now().isoformat())
-
-    # Step 1: Wait for MongoDB
-    logger.info("\n[1/4] Waiting for MongoDB…")
+    logger.info("=== NLP Article Analyzer - Initialization ===")
+    
+    # Step 1: Wait for MongoDB (everyone needs this)
     if not wait_for_mongodb():
-        logger.error("✗ MongoDB not available. Aborting.")
         return 1
 
+    if skip_bootstrap:
+        logger.info("Skipping heavy initialization (bootstrap/schema check)")
+        return 0
+
     # Step 2: Initialize database schemas
-    logger.info("\n[2/4] Initializing databases…")
     if not initialize_databases():
-        logger.error("✗ Database initialization failed. Aborting.")
         return 1
 
     # Step 3: Check if bootstrap needed
-    logger.info("\n[3/4] Checking if bootstrap required…")
     if is_database_empty():
-        logger.info("Database empty. Attempting bootstrap…")
         if not bootstrap_from_kaggle():
-            logger.error("✗ Bootstrap failed. Aborting.")
             return 1
     else:
         logger.info("Database already populated. Skipping bootstrap.")
-
-    # Step 4: Ready to start service
-    logger.info("\n[4/4] Ready to start service…")
-    logger.info("✓ Initialization complete")
-    logger.info("=== Startup sequence finished ===\n")
 
     return 0
 
@@ -232,17 +221,18 @@ def run_entrypoint_sequence() -> int:
 def main() -> int:
     """
     Main entrypoint.
-
-    Runs initialization sequence, then delegates to the requested service.
     """
-    # Parse command line arguments
     args = sys.argv[1:] if len(sys.argv) > 1 else ["api"]
-
-    # Determine service mode
     service_arg = args[0] if args else "api"
 
-    # Run initialization
-    init_result = run_entrypoint_sequence()
+    # Setup mode: Run init and exit
+    if service_arg == "setup":
+        return run_entrypoint_sequence(skip_bootstrap=False)
+
+    # All other modes: Run minimal init (just wait for DB)
+    import os
+    skip_heavy = os.environ.get("SKIP_SETUP_SEQUENCE", "false").lower() == "true"
+    init_result = run_entrypoint_sequence(skip_bootstrap=skip_heavy)
     if init_result != 0:
         return init_result
 

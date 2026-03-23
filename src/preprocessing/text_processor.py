@@ -152,7 +152,7 @@ class TextProcessor:
         return results
 
 
-@lru_cache(max_size=1)
+@lru_cache(maxsize=1)
 def get_default_processor() -> TextProcessor:
     """Singleton default processor."""
     return TextProcessor()

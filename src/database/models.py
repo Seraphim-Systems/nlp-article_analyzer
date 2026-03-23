@@ -63,6 +63,7 @@ ARTICLE_VALIDATOR: dict[str, Any] = {
                 "description": "Cited/referenced URLs",
             },
             "sum": {"bsonType": ["string", "null"], "description": "Short summary"},
+            "kaggle_id": {"bsonType": ["string", "null"], "description": "Original ID from Kaggle dataset"},
             "body": {"bsonType": "string", "description": "Main article body text"},
             "text": {
                 "bsonType": ["string", "null"],
@@ -170,6 +171,7 @@ def build_article_dict(
     cleaning_flags: dict[str, bool] | None = None,
     signal_counts: dict[str, int] | None = None,
     rank_reasons: list[str] | None = None,
+    kaggle_id: str | None = None,
     source_author: str | None = None,
     source_tags: list[str] | None = None,
     source_summary: str | None = None,
@@ -191,6 +193,7 @@ def build_article_dict(
         "body": body,
         "text": text,
         "rank": rank,
+        "kaggle_id": kaggle_id,
         "clean_text": clean_text,
         "preprocessed_text": preprocessed_text,
         "money_tags": money_tags,

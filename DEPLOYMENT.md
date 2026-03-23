@@ -95,7 +95,7 @@ Check if databases empty?
     │
     ├─ Yes (fresh install) → Download Kaggle dataset
     │                           ↓
-    │                      Parse CSV files
+    │                      Parse JSON files
     │                           ↓
     │                      Ingest into raw collection
     │                           ↓

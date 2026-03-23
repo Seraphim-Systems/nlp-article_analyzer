@@ -26,6 +26,7 @@ services:
     image: mongo:7.0
     container_name: nlp_mongodb_dev
     restart: unless-stopped
+    command: ["mongod", "--slowms", "5000"]
     ports:
       - "27017:27017"
     volumes:

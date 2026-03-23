@@ -9,6 +9,7 @@ Dataset: https://www.kaggle.com/datasets/julianschelb/newsdata
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -118,19 +119,39 @@ def ingest_kaggle_dataset(
                 insert_sentences,
             )
 
+            # Ingest articles (usually a smaller number)
             inserted_articles = insert_raw_articles(articles) if articles else 0
-            inserted_entities = insert_entities(entities) if entities else 0
-            inserted_sentences = insert_sentences(sentences) if sentences else 0
-
             result["inserted_articles"] = inserted_articles
-            result["inserted_entities"] = inserted_entities
-            result["inserted_sentences"] = inserted_sentences
+
+            # Ingest entities in chunks (millions of records)
+            if entities:
+                logger.info("Ingesting %d entities in small batches…", len(entities))
+                chunk_size = 10000
+                total_inserted_entities = 0
+                for i in range(0, len(entities), chunk_size):
+                    chunk = entities[i : i + chunk_size]
+                    total_inserted_entities += insert_entities(chunk)
+                    if (i // chunk_size) % 10 == 0:  # Log every 100k
+                        logger.info("  Progress: %d / %d entities", i, len(entities))
+                result["inserted_entities"] = total_inserted_entities
+            
+            # Ingest sentences in chunks (millions of records)
+            if sentences:
+                logger.info("Ingesting %d sentences in small batches…", len(sentences))
+                chunk_size = 10000
+                total_inserted_sentences = 0
+                for i in range(0, len(sentences), chunk_size):
+                    chunk = sentences[i : i + chunk_size]
+                    total_inserted_sentences += insert_sentences(chunk)
+                    if (i // chunk_size) % 10 == 0:  # Log every 100k
+                        logger.info("  Progress: %d / %d sentences", i, len(sentences))
+                result["inserted_sentences"] = total_inserted_sentences
 
             logger.info(
-                "Ingested %d articles, %d entities, %d sentences",
-                inserted_articles,
-                inserted_entities,
-                inserted_sentences,
+                "Ingestion complete: %d articles, %d entities, %d sentences",
+                result["inserted_articles"],
+                result["inserted_entities"],
+                result["inserted_sentences"],
             )
         else:
             logger.info(
@@ -219,73 +240,77 @@ def _parse_kaggle_files(
 
     Returns tuple of (articles, entities, sentences) lists.
     """
-    import json
-
     articles: list[dict[str, Any]] = []
     entities: list[dict[str, Any]] = []
     sentences: list[dict[str, Any]] = []
 
     dataset_dir = Path(dataset_path)
 
-    # Try both old CSV and new JSON formats
-    csv_files = list(dataset_dir.glob("*.csv"))
+    # Search for JSON files only (enforcing JSON extraction)
     json_files = list(dataset_dir.glob("*.json"))
 
-    # Parse CSV files (old format)
-    if csv_files:
-        logger.info("Found %d CSV files (old format)", len(csv_files))
-        articles.extend(_parse_csv_files(json_files))
+    if not json_files:
+        logger.warning("No JSON files found in %s", dataset_path)
+        return articles, entities, sentences
 
-    # Parse JSON files (new format)
-    if json_files:
-        logger.info("Found %d JSON files (new format)", len(json_files))
+    logger.info("Found %d JSON files", len(json_files))
 
-        for json_file in json_files:
-            logger.info("Parsing %s", json_file.name)
+    for json_file in json_files:
+        logger.info("Parsing %s", json_file.name)
 
-            try:
-                with open(json_file, encoding="utf-8") as f:
+        try:
+            # Try standard JSON first
+            with open(json_file, encoding="utf-8") as f:
+                try:
                     data = json.load(f)
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict):
+                        records = data.get("data", data.get("records", [data]))
+                    else:
+                        records = []
+                except json.JSONDecodeError:
+                    # If standard JSON fails, try JSONL (line-by-line)
+                    f.seek(0)
+                    records = []
+                    for line in f:
+                        if line.strip():
+                            try:
+                                records.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                continue
+            
+            if not records:
+                continue
 
-                # Handle list of records
-                if isinstance(data, list):
-                    records = data
-                # Handle dict with records in a key
-                elif isinstance(data, dict):
-                    records = data.get("data", data.get("records", [data]))
-                else:
-                    logger.warning("Unexpected JSON structure in %s", json_file.name)
+            # Classify records by structure
+            for record in records:
+                if not isinstance(record, dict):
                     continue
 
-                # Classify records by structure
-                for record in records:
-                    if not isinstance(record, dict):
-                        continue
+                # Articles usually have 'title' and ('url' or 'text' or '_id')
+                if "title" in record and ("text" in record or "url" in record or "_id" in record):
+                    # Article record
+                    article = _parse_article_record(record)
+                    if article:
+                        articles.append(article)
 
-                    if "title" in record and "url" in record:
-                        # Article record
-                        article = _parse_article_record(record)
-                        if article:
-                            articles.append(article)
+                elif "NE" in record and ("docID" in record or "doc_id" in record):
+                    # Entity record
+                    entity = _parse_entity_record(record)
+                    if entity:
+                        entities.append(entity)
 
-                    elif "NE" in record and "docID" in record:
-                        # Entity record
-                        entity = _parse_entity_record(record)
-                        if entity:
-                            entities.append(entity)
+                elif (
+                    "text" in record and "docID" in record and "senDocID" in record
+                ):
+                    # Sentence record
+                    sentence = _parse_sentence_record(record)
+                    if sentence:
+                        sentences.append(sentence)
 
-                    elif (
-                        "text" in record and "docID" in record and "senDocID" in record
-                    ):
-                        # Sentence record
-                        sentence = _parse_sentence_record(record)
-                        if sentence:
-                            sentences.append(sentence)
-
-            except json.JSONDecodeError as e:
-                logger.warning("Failed to parse JSON %s: %s", json_file.name, e)
-            except Exception as e:
-                logger.warning("Error processing %s: %s", json_file.name, e)
+        except Exception as e:
+            logger.warning("Error processing %s: %s", json_file.name, e)
 
     logger.info(
         "Parsed %d articles, %d entities, %d sentences",
@@ -296,38 +321,15 @@ def _parse_kaggle_files(
     return articles, entities, sentences
 
 
-def _parse_csv_files(csv_files: list[Path]) -> list[dict[str, Any]]:
-    """Parse old CSV format (fallback for backward compatibility)."""
-    import csv
-
-    articles: list[dict[str, Any]] = []
-
-    for csv_file in csv_files:
-        try:
-            with open(csv_file, encoding=" utf-8") as f:
-                reader = csv.DictReader(f)
-                if not reader.fieldnames:
-                    continue
-
-                for row in reader:
-                    article = _parse_kaggle_row(row)
-                    if article:
-                        articles.append(article)
-
-        except Exception as e:
-            logger.warning("Failed to parse CSV %s: %s", csv_file.name, e)
-
-    return articles
-
-
 def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
     """Parse article from JSON record (new format)."""
     try:
-        url = record.get("url", "").strip()
+        # Robust URL and Title extraction
+        url = str(record.get("url") or record.get("_id") or "").strip()
         title = record.get("title", "").strip()
-        body = record.get("text", "").strip() or record.get("content", "").strip()
+        body = record.get("text", record.get("content", "")).strip()
 
-        if not url or not title or not body:
+        if not title or not body:
             return None
 
         # Publication date
@@ -342,18 +344,22 @@ def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
 
         ret_date = datetime.now(timezone.utc).isoformat()
 
+        # Capture Kaggle internal ID for potential joins
+        kaggle_id = record.get("_id") or record.get("id")
+
         return {
             "url": url,
             "title": title,
-            "feed": record.get("feed", record.get("source", "Kaggle Dataset")).strip(),
+            "feed": record.get("feed", "Kaggle Dataset").strip(),
             "type": record.get("type", "news").strip(),
             "pub": pub_date,
             "ret": ret_date,
             "lang": record.get("lang", "en").strip(),
             "body": body,
-            "text": record.get("text", "").strip(),
+            "text": body,  # using body as text if text field is same
             "refs": record.get("refs", []),
-            "sum": record.get("sum", record.get("description", "")).strip(),
+            "sum": record.get("sum", "").strip(),
+            "kaggle_id": kaggle_id,
             "rank": None,
         }
 
@@ -405,55 +411,6 @@ def _parse_sentence_record(record: dict[str, Any]) -> dict[str, Any] | None:
 
     except (ValueError, TypeError, AttributeError) as e:
         logger.debug("Failed to parse sentence record: %s", e)
-        return None
-
-
-def _parse_kaggle_row(row: dict[str, str]) -> dict[str, Any] | None:
-    """
-    Convert a Kaggle CSV row to article dict.
-
-    Kaggle newsdata typically has columns:
-    - title, description, content, url, urlToImage, publishedAt, source
-    """
-    try:
-        # Required fields
-        url = row.get("url", "").strip()
-        title = row.get("title", "").strip()
-        body = row.get("content", "").strip() or row.get("description", "").strip()
-
-        if not url or not title or not body:
-            return None
-
-        # Publication date
-        pub_date = row.get("publishedAt", "").strip()
-        if pub_date:
-            try:
-                # Parse ISO-8601 date
-                pub_date = datetime.fromisoformat(
-                    pub_date.replace("Z", "+00:00")
-                ).isoformat()
-            except (ValueError, AttributeError):
-                pub_date = None
-
-        # Retrieval date (now)
-        ret_date = datetime.now(timezone.utc).isoformat()
-
-        return {
-            "url": url,
-            "title": title,
-            "feed": row.get("source", "Kaggle Dataset").strip(),
-            "type": "news",
-            "pub": pub_date,
-            "ret": ret_date,
-            "lang": "en",  # Assume English from Kaggle dataset
-            "body": body,
-            "text": row.get("description", "").strip(),
-            "refs": [],
-            "sum": row.get("description", "").strip(),
-            "rank": None,  # Will be ranked by cleaning pipeline
-        }
-
-    except (KeyError, AttributeError, TypeError):
         return None
 
 

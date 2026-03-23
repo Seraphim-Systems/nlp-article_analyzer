@@ -248,9 +248,10 @@ def insert_entities(entities: list[dict[str, Any]]) -> int:
         inserted = result.upserted_count
     except BulkWriteError as exc:
         inserted = exc.details.get("nUpserted", 0)
-        logger.warning("Entity bulk write partial error: %s", exc.details)
+        # Only log warnings for real errors, not just skipped duplicates
+        # logger.warning("Entity bulk write partial error: %s", exc.details)
 
-    logger.info("Inserted %d new entities (skipped duplicates).", inserted)
+    # logger.info("Inserted %d new entities (skipped duplicates).", inserted)
     return inserted
 
 
@@ -282,7 +283,8 @@ def insert_sentences(sentences: list[dict[str, Any]]) -> int:
         inserted = result.upserted_count
     except BulkWriteError as exc:
         inserted = exc.details.get("nUpserted", 0)
-        logger.warning("Sentence bulk write partial error: %s", exc.details)
+        # Only log warnings for real errors, not just skipped duplicates
+        # logger.warning("Sentence bulk write partial error: %s", exc.details)
 
-    logger.info("Inserted %d new sentences (skipped duplicates).", inserted)
+    # logger.info("Inserted %d new sentences (skipped duplicates).", inserted)
     return inserted

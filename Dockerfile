@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -12,8 +12,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Download NLTK and SpaCy resources needed by newspaper3k and preprocessing
-RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True); nltk.download('stopwords', quiet=True)" \
-    && python -m spacy download en_core_web_sm --quiet
+ENV NLTK_DATA=/usr/local/share/nltk_data
+RUN mkdir -p $NLTK_DATA \
+    && python3 -m nltk.downloader -d $NLTK_DATA punkt punkt_tab stopwords averaged_perceptron_tagger_eng \
+    && python3 -m spacy download en_core_web_sm
 
 COPY . .
 

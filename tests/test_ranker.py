@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from cleaning.ranker import rank_article, rank_article_with_reasons, rank_articles, summarise_ranks
+from cleaning.ranker import (
+    rank_article,
+    rank_article_with_reasons,
+    rank_articles,
+    summarise_ranks,
+)
 
 
 def _full_article(**overrides):
