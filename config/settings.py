@@ -34,6 +34,11 @@ def _env_bool(key: str, default: bool) -> bool:
 
 @dataclass
 class Settings:
+    #: Runtime environment (development, staging, production)
+    ENVIRONMENT: str = field(
+        default_factory=lambda: _env("ENVIRONMENT", "development")
+    )
+
     # ------------------------------------------------------------------
     # MongoDB
     # ------------------------------------------------------------------

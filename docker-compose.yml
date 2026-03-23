@@ -6,15 +6,13 @@
 # - Single MongoDB service with attached volumes
 # - Job runner for manual/scheduled job execution
 # - FastAPI service for testing REST endpoints
-# - Services depend on MongoDB health checks
+# - React frontend for data visualization
 #
 # Usage:
 #   docker-compose up -d              # Start all services
 #   docker-compose logs -f api        # Follow API logs
 #   docker-compose exec mongodb mongosh  # Connect to MongoDB
 #   docker-compose down               # Stop and clean
-#
-# For production, use docker-compose.prod.yml instead.
 
 volumes:
   mongo_data:
@@ -133,7 +131,6 @@ services:
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
       SKIP_BOOTSTRAP: "false"
-    # Entrypoint handles init + bootstrap, CMD specifies 'api' service
     command: api
     volumes:
       - ./src:/app/src

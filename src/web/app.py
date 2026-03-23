@@ -22,6 +22,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
+from config.settings import settings
+from database.repositories import (
+    get_clean_collection,
+    count_clean_articles,
+    count_raw_articles_by_rank,
+)
+from database.connection import get_client
+
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────
@@ -38,6 +46,7 @@ _jobs: dict[str, dict[str, Any]] = {}
 
 class HealthResponse(BaseModel):
     status: str
+    database: str
     timestamp: str
     mongodb: str
     collections: dict[str, int]
@@ -63,6 +72,27 @@ class JobStatusResponse(BaseModel):
     started_at: str
     finished_at: str | None
     result: dict | None
+
+
+class ArticleResponse(BaseModel):
+    url: str
+    title: str
+    feed: str
+    pub: str | None = None
+    lang: str | None = None
+
+
+class ArticleListResponse(BaseModel):
+    items: list[ArticleResponse]
+    total: int
+    skip: int
+    limit: int
+
+
+class StatsResponse(BaseModel):
+    clean_count: int
+    raw_counts: dict[str, int]
+    timestamp: str
 
 
 class MetricsResponse(BaseModel):
@@ -91,6 +121,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://frontend:5173",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -101,7 +132,6 @@ app.add_middleware(
 # ──────────────────────────────────────────────────────────────
 # Health + Stats
 # ──────────────────────────────────────────────────────────────
-
 
 @app.get("/", tags=["root"])
 def read_root() -> dict:
@@ -130,6 +160,7 @@ async def health() -> HealthResponse:
 
     return HealthResponse(
         status="healthy" if mongo_status == "healthy" else "degraded",
+        database=mongo_status,
         timestamp=datetime.utcnow().isoformat() + "Z",
         mongodb=mongo_status,
         collections=counts,
@@ -410,7 +441,6 @@ async def get_metrics() -> MetricsResponse:
 # ──────────────────────────────────────────────────────────────
 # Startup
 # ──────────────────────────────────────────────────────────────
-
 
 @app.on_event("startup")
 async def startup_event() -> None:
