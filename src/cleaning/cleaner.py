@@ -6,11 +6,11 @@ Orchestrates the full cleaning flow on raw articles:
   Step 1 — Rank all unranked raw articles (assign rank 0 / 1 / 2).
   Step 2 — For Rank-1 articles: attempt to fill missing fields via URL re-fetch,
             then re-rank; articles that reach Rank 0 are promoted.
-  Step 3 — Rank-2 articles are deleted from the raw collection.
-  Step 4 — Rank-0 articles are upserted into the clean collection.
+    Step 3 — Rank-0 articles are normalized/enriched and upserted to clean.
+    Step 4 — Rank-2 articles are quarantined for auditing/recovery.
 
-The raw collection always retains the original scraped data (minus rank-2
-documents) as a safety net.  The clean collection holds only quality-verified
+The raw collection retains original scraped data as a safety net. The clean
+collection holds quality-verified and enriched
 articles ready for downstream NLP processing.
 """
 
@@ -23,13 +23,14 @@ from tqdm import tqdm
 
 from database.repositories import (
     count_raw_articles_by_rank,
-    delete_raw_by_rank,
     get_raw_articles_by_rank,
+    upsert_quarantine_articles,
     update_raw_article_fields,
     update_raw_rank,
     upsert_clean_articles,
 )
-from cleaning.ranker import rank_article, rank_articles, summarise_ranks
+from cleaning.normalizer import enrich_article_for_cleaning
+from cleaning.ranker import rank_article_with_reasons
 from cleaning.url_fetcher import fill_missing_fields
 
 logger = logging.getLogger(__name__)
@@ -48,8 +49,8 @@ def _rank_unranked_articles() -> None:
 
     logger.info("Ranking %d unranked articles…", len(unranked))
     for article in tqdm(unranked, desc="Ranking", unit="art"):
-        rank = rank_article(article)
-        update_raw_rank(article["url"], rank)
+        rank, reasons = rank_article_with_reasons(article)
+        update_raw_rank(article["url"], rank, reasons)
 
     logger.info("Ranking complete.")
 
@@ -69,7 +70,7 @@ def _process_rank1() -> None:
 
     for article in tqdm(rank1_articles, desc="Recovering rank-1", unit="art"):
         patched = fill_missing_fields(article)
-        new_rank = rank_article(patched)
+        new_rank, reasons = rank_article_with_reasons(patched)
 
         # Persist any newly filled fields back to raw
         changed_fields = {
@@ -80,7 +81,7 @@ def _process_rank1() -> None:
         if changed_fields:
             update_raw_article_fields(article["url"], changed_fields)
 
-        update_raw_rank(article["url"], new_rank)
+        update_raw_rank(article["url"], new_rank, reasons)
 
         if new_rank == 0:
             promoted += 1
@@ -97,16 +98,22 @@ def _promote_rank0_to_clean() -> int:
         logger.info("No Rank-0 articles to promote.")
         return 0
 
-    upserted = upsert_clean_articles(rank0_articles)
+    enriched = [enrich_article_for_cleaning(a) for a in rank0_articles]
+    upserted = upsert_clean_articles(enriched)
     logger.info("Promoted %d Rank-0 articles to clean collection.", upserted)
     return upserted
 
 
-def _discard_rank2() -> int:
-    """Delete Rank-2 articles from the raw collection."""
-    deleted = delete_raw_by_rank(2)
-    logger.info("Discarded %d Rank-2 articles.", deleted)
-    return deleted
+def _quarantine_rank2() -> int:
+    """Store Rank-2 articles in quarantine for audit/recovery."""
+    rank2_articles = list(get_raw_articles_by_rank(2))
+    if not rank2_articles:
+        logger.info("No Rank-2 articles to quarantine.")
+        return 0
+
+    quarantined = upsert_quarantine_articles(rank2_articles)
+    logger.info("Quarantined %d Rank-2 articles.", quarantined)
+    return quarantined
 
 
 def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
@@ -140,8 +147,8 @@ def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
     # Step 3: promote rank-0 to clean DB
     promoted = _promote_rank0_to_clean()
 
-    # Step 4: delete rank-2 from raw
-    discarded = _discard_rank2()
+    # Step 4: quarantine rank-2 for auditing / future recovery
+    discarded = _quarantine_rank2()
 
     # Summary
     rank_counts = count_raw_articles_by_rank()

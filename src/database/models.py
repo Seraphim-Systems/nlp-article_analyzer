@@ -41,22 +41,82 @@ ARTICLE_VALIDATOR: dict[str, Any] = {
         "bsonType": "object",
         "required": ["url", "title", "feed", "body"],
         "properties": {
-            "url":   {"bsonType": "string", "description": "Canonical article URL"},
+            "url": {"bsonType": "string", "description": "Canonical article URL"},
             "title": {"bsonType": "string", "description": "Article headline"},
-            "feed":  {"bsonType": "string", "description": "Publisher / RSS feed name"},
-            "type":  {"bsonType": ["string", "null"], "description": "Content type"},
-            "pub":   {"bsonType": ["string", "null"], "description": "Publication date (ISO-8601)"},
-            "ret":   {"bsonType": ["string", "null"], "description": "Retrieval datetime (ISO-8601)"},
-            "lang":  {"bsonType": ["string", "null"], "description": "BCP-47 language tag"},
-            "refs":  {
+            "feed": {"bsonType": "string", "description": "Publisher / RSS feed name"},
+            "type": {"bsonType": ["string", "null"], "description": "Content type"},
+            "pub": {
+                "bsonType": ["string", "null"],
+                "description": "Publication date (ISO-8601)",
+            },
+            "ret": {
+                "bsonType": ["string", "null"],
+                "description": "Retrieval datetime (ISO-8601)",
+            },
+            "lang": {
+                "bsonType": ["string", "null"],
+                "description": "BCP-47 language tag",
+            },
+            "refs": {
                 "bsonType": ["array", "null"],
                 "items": {"bsonType": "string"},
                 "description": "Cited/referenced URLs",
             },
-            "sum":   {"bsonType": ["string", "null"], "description": "Short summary"},
-            "body":  {"bsonType": "string", "description": "Main article body text"},
-            "text":  {"bsonType": ["string", "null"], "description": "Full raw page text"},
-            "rank":  {
+            "sum": {"bsonType": ["string", "null"], "description": "Short summary"},
+            "kaggle_id": {"bsonType": ["string", "null"], "description": "Original ID from Kaggle dataset"},
+            "body": {"bsonType": "string", "description": "Main article body text"},
+            "text": {
+                "bsonType": ["string", "null"],
+                "description": "Full raw page text",
+            },
+            "clean_text": {
+                "bsonType": ["string", "null"],
+                "description": "Normalized article body text",
+            },
+            "preprocessed_text": {
+                "bsonType": ["string", "null"],
+                "description": "NLP-cleaned body text (lemmatized, no stopwords)",
+            },
+            "money_tags": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+            },
+            "percent_tags": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+            },
+            "datetime_tags": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+            },
+            "url_tags": {
+                "bsonType": ["array", "null"],
+                "items": {
+                    "bsonType": "object",
+                    "properties": {
+                        "url": {"bsonType": "string"},
+                        "domain": {"bsonType": "string"},
+                        "tld": {"bsonType": "string"},
+                        "path": {"bsonType": "string"},
+                    },
+                },
+            },
+            "doc_stats": {
+                "bsonType": ["object", "null"],
+                "properties": {
+                    "char_count": {"bsonType": "int"},
+                    "token_count": {"bsonType": "int"},
+                    "sentence_count": {"bsonType": "int"},
+                    "paragraph_count": {"bsonType": "int"},
+                },
+            },
+            "cleaning_flags": {
+                "bsonType": ["object", "null"],
+            },
+            "signal_counts": {
+                "bsonType": ["object", "null"],
+            },
+            "rank": {
                 "bsonType": ["int", "null"],
                 "enum": [0, 1, 2, None],
                 "description": "Data-quality rank (0=complete, 1=minor gaps, 2=discard)",
@@ -140,20 +200,126 @@ def build_article_dict(
     refs: list[str] | None = None,
     sum_: str | None = None,
     text: str | None = None,
+    clean_text: str | None = None,
+    money_tags: list[str] | None = None,
+    percent_tags: list[str] | None = None,
+    datetime_tags: list[str] | None = None,
+    url_tags: list[dict[str, str]] | None = None,
+    doc_stats: dict[str, int] | None = None,
+    cleaning_flags: dict[str, bool] | None = None,
+    signal_counts: dict[str, int] | None = None,
+    rank_reasons: list[str] | None = None,
+    kaggle_id: str | None = None,
+    source_author: str | None = None,
+    source_tags: list[str] | None = None,
+    source_summary: str | None = None,
+    source_published: str | None = None,
+    quarantined_at: str | None = None,
     rank: int | None = None,
 ) -> dict[str, Any]:
     """Return a plain dict that matches the article schema."""
     return {
-        "url":   url,
+        "url": url,
         "title": title,
-        "feed":  feed,
-        "type":  type_,
-        "pub":   pub,
-        "ret":   ret,
-        "lang":  lang,
-        "refs":  refs,
-        "sum":   sum_,
-        "body":  body,
-        "text":  text,
-        "rank":  rank,
+        "feed": feed,
+        "type": type_,
+        "pub": pub,
+        "ret": ret,
+        "lang": lang,
+        "refs": refs,
+        "sum": sum_,
+        "body": body,
+        "text": text,
+        "rank": rank,
+        "kaggle_id": kaggle_id,
+        "clean_text": clean_text,
+        "preprocessed_text": preprocessed_text,
+        "money_tags": money_tags,
+        "percent_tags": percent_tags,
+        "datetime_tags": datetime_tags,
+        "url_tags": url_tags,
+        "doc_stats": doc_stats,
+        "cleaning_flags": cleaning_flags,
+        "signal_counts": signal_counts,
     }
+
+
+# ---------------------------------------------------------------------------
+# Named Entities Collection Schema
+# ---------------------------------------------------------------------------
+#
+# Field reference:
+#   _id      : ObjectId (auto-generated by MongoDB)
+#   docID    : article id from relevant_articles.json (references articles._id)
+#   senDocID : sentence id within the article
+#   NE       : the named entity text
+#   sSen     : character index of entity start in sentence
+#   eSen     : character index of entity end in sentence
+
+ENTITY_VALIDATOR: dict[str, Any] = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["docID", "senDocID", "NE", "sSen", "eSen"],
+        "properties": {
+            "docID": {
+                "bsonType": "string",
+                "description": "Article ID from relevant_articles",
+            },
+            "senDocID": {
+                "bsonType": "int",
+                "description": "Sentence ID within article",
+            },
+            "NE": {"bsonType": "string", "description": "Named entity text"},
+            "sSen": {"bsonType": "int", "description": "Entity start character index"},
+            "eSen": {"bsonType": "int", "description": "Entity end character index"},
+        },
+    }
+}
+
+ENTITY_INDEXES = [
+    # Find entities by article
+    {"keys": [("docID", 1)], "options": {"name": "docID_idx"}},
+    # Find entities by sentence
+    {"keys": [("senDocID", 1)], "options": {"name": "senDocID_idx"}},
+    # Compound index for article+sentence lookups
+    {"keys": [("docID", 1), ("senDocID", 1)], "options": {"name": "doc_sen_idx"}},
+]
+
+
+# ---------------------------------------------------------------------------
+# Sentences Collection Schema
+# ---------------------------------------------------------------------------
+#
+# Field reference:
+#   _id      : ObjectId (auto-generated by MongoDB) [or {"docID", "senDocID"} as key]
+#   docID    : article id from relevant_articles.json
+#   senDocID : sentence id within the article
+#   text     : the actual sentence text
+
+SENTENCE_VALIDATOR: dict[str, Any] = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["docID", "senDocID", "text"],
+        "properties": {
+            "docID": {
+                "bsonType": "string",
+                "description": "Article ID from relevant_articles",
+            },
+            "senDocID": {
+                "bsonType": "int",
+                "description": "Sentence ID within article",
+            },
+            "text": {"bsonType": "string", "description": "Sentence text"},
+        },
+    }
+}
+
+SENTENCE_INDEXES = [
+    # Unique constraint per article+sentence
+    {
+        "keys": [("docID", 1), ("senDocID", 1)],
+        "options": {"unique": True, "name": "doc_sen_unique"},
+    },
+    # Find all sentences by article
+    {"keys": [("docID", 1)], "options": {"name": "docID_idx"}},
+]

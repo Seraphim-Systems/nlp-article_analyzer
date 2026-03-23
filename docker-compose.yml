@@ -28,6 +28,7 @@ services:
     image: mongo:7.0
     container_name: nlp_mongodb_dev
     restart: unless-stopped
+    command: ["mongod", "--slowms", "5000"]
     ports:
       - "27017:27017"
     volumes:
@@ -35,7 +36,9 @@ services:
     environment:
       MONGO_INITDB_DATABASE: admin
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test:
+        - CMD-SHELL
+        - "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' || exit 1"
       interval: 5s
       timeout: 5s
       retries: 5
@@ -58,6 +61,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    env_file: .env
     environment:
       MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw
@@ -73,6 +77,8 @@ services:
       KAGGLE_KEY: ${KAGGLE_KEY}
       SKIP_BOOTSTRAP: "false"
       SKIP_RANK1_RECOVERY: "true"
+      RUN_CLEAN_AFTER_SCRAPE: "true"
+      ENGLISH_ONLY: "true"
     # Entrypoint handles init + bootstrap, then waits for manual job execution
     # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
     # Or schedule via cron using orchestrate_jobs.sh
@@ -102,6 +108,7 @@ services:
         condition: service_healthy
     ports:
       - "8000:80"
+    env_file: .env
     environment:
       MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw

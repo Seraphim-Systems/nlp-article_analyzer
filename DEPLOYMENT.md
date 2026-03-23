@@ -71,7 +71,9 @@ KAGGLE_ENABLED=false|true
 KAGGLE_DATASET=julianschelb/newsdata
 
 # Kaggle API credentials (from https://www.kaggle.com/settings/account)
-KAGGLE_USERNAME=your-username
+# Modern tokens: leave KAGGLE_USERNAME empty, paste full token in KAGGLE_KEY
+# Legacy format: provide both username and key
+KAGGLE_USERNAME=
 KAGGLE_KEY=your-api-key
 
 # Skip bootstrap entirely (useful after initial setup)
@@ -93,7 +95,7 @@ Check if databases empty?
     │
     ├─ Yes (fresh install) → Download Kaggle dataset
     │                           ↓
-    │                      Parse CSV files
+    │                      Parse JSON files
     │                           ↓
     │                      Ingest into raw collection
     │                           ↓
@@ -216,8 +218,9 @@ For initial data population, you can enable Kaggle dataset bootstrap on first st
 # Edit .env for production
 cat > .env << EOF
 KAGGLE_ENABLED=true
-KAGGLE_USERNAME=your-kaggle-username
-KAGGLE_KEY=your-kaggle-key
+# Modern tokens: leave KAGGLE_USERNAME empty, paste full token in KAGGLE_KEY
+KAGGLE_USERNAME=
+KAGGLE_KEY=your-kaggle-api-key
 SKIP_BOOTSTRAP=false
 EOF
 

@@ -9,6 +9,7 @@ Dataset: https://www.kaggle.com/datasets/julianschelb/newsdata
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -48,17 +49,22 @@ def ingest_kaggle_dataset(
     result: dict[str, Any] = {
         "status": "success",
         "downloaded": 0,
-        "parsed": 0,
-        "inserted": 0,
+        "parsed_articles": 0,
+        "parsed_entities": 0,
+        "parsed_sentences": 0,
+        "inserted_articles": 0,
+        "inserted_entities": 0,
+        "inserted_sentences": 0,
         "errors": [],
     }
 
     try:
         # Validate Kaggle credentials
-        if not settings.KAGGLE_USERNAME or not settings.KAGGLE_KEY:
+        # Modern tokens only require KAGGLE_KEY; username is optional
+        if not settings.KAGGLE_KEY:
             result["status"] = "failed"
             result["errors"].append(
-                "Kaggle credentials not configured (KAGGLE_USERNAME, KAGGLE_KEY)"
+                "Kaggle API key not configured (KAGGLE_KEY). Modern tokens only require the key, not a username."
             )
             return result
 
@@ -72,7 +78,9 @@ def ingest_kaggle_dataset(
         )
 
         # Setup Kaggle API authentication
-        _setup_kaggle_auth(settings.KAGGLE_USERNAME, settings.KAGGLE_KEY)
+        # Pass None for username if not configured (modern token format)
+        username = settings.KAGGLE_USERNAME or None
+        _setup_kaggle_auth(username, settings.KAGGLE_KEY)
 
         # Download dataset
         downloaded = _download_kaggle_dataset(settings.KAGGLE_DATASET, str(dl_path_obj))
@@ -85,26 +93,76 @@ def ingest_kaggle_dataset(
 
         logger.info("Downloaded %d files, parsing…", downloaded)
 
-        # Parse dataset files
-        articles = _parse_kaggle_files(str(dl_path_obj))
-        result["parsed"] = len(articles)
+        # Parse dataset files (returns articles, entities, sentences)
+        articles, entities, sentences = _parse_kaggle_files(str(dl_path_obj))
+        result["parsed_articles"] = len(articles)
+        result["parsed_entities"] = len(entities)
+        result["parsed_sentences"] = len(sentences)
 
-        if not articles:
-            logger.warning("No articles found in downloaded dataset")
+        total_parsed = len(articles) + len(entities) + len(sentences)
+        if total_parsed == 0:
+            logger.warning("No records found in downloaded dataset")
             return result
 
-        logger.info("Parsed %d articles, ingesting into MongoDB…", len(articles))
+        logger.info(
+            "Parsed %d articles, %d entities, %d sentences; ingesting into MongoDB…",
+            len(articles),
+            len(entities),
+            len(sentences),
+        )
 
         # Ingest into MongoDB
         if not dry_run:
-            from database.repositories import insert_raw_articles
+            from database.repositories import (
+                insert_raw_articles,
+                insert_entities,
+                insert_sentences,
+            )
 
-            inserted = insert_raw_articles(articles)
-            result["inserted"] = inserted
-            logger.info("Ingested %d articles into raw collection", inserted)
+            # Ingest articles (usually a smaller number)
+            inserted_articles = insert_raw_articles(articles) if articles else 0
+            result["inserted_articles"] = inserted_articles
+
+            # Ingest entities in chunks (millions of records)
+            if entities:
+                logger.info("Ingesting %d entities in small batches…", len(entities))
+                chunk_size = 10000
+                total_inserted_entities = 0
+                for i in range(0, len(entities), chunk_size):
+                    chunk = entities[i : i + chunk_size]
+                    total_inserted_entities += insert_entities(chunk)
+                    if (i // chunk_size) % 10 == 0:  # Log every 100k
+                        logger.info("  Progress: %d / %d entities", i, len(entities))
+                result["inserted_entities"] = total_inserted_entities
+            
+            # Ingest sentences in chunks (millions of records)
+            if sentences:
+                logger.info("Ingesting %d sentences in small batches…", len(sentences))
+                chunk_size = 10000
+                total_inserted_sentences = 0
+                for i in range(0, len(sentences), chunk_size):
+                    chunk = sentences[i : i + chunk_size]
+                    total_inserted_sentences += insert_sentences(chunk)
+                    if (i // chunk_size) % 10 == 0:  # Log every 100k
+                        logger.info("  Progress: %d / %d sentences", i, len(sentences))
+                result["inserted_sentences"] = total_inserted_sentences
+
+            logger.info(
+                "Ingestion complete: %d articles, %d entities, %d sentences",
+                result["inserted_articles"],
+                result["inserted_entities"],
+                result["inserted_sentences"],
+            )
         else:
-            logger.info("DRY RUN: Would ingest %d articles", len(articles))
-            result["inserted"] = len(articles)
+            logger.info(
+                "DRY RUN: Would ingest %d articles, %d entities, %d sentences",
+                len(articles),
+                len(entities),
+                len(sentences),
+            )
+            result["inserted_articles"] = len(articles)
+            result["inserted_entities"] = len(entities)
+            result["inserted_sentences"] = len(sentences)
 
         # Cleanup
         logger.info("Cleaning up downloaded files…")
@@ -120,12 +178,23 @@ def ingest_kaggle_dataset(
     return result
 
 
-def _setup_kaggle_auth(username: str, key: str) -> None:
-    """Configure Kaggle API authentication via environment."""
+def _setup_kaggle_auth(username: str | None, key: str) -> None:
+    """
+    Configure Kaggle API authentication via environment.
+
+    Supports both legacy (username + key) and modern (token-only) formats:
+    - Legacy: username="myusername", key="mykey"
+    - Modern: username=None or "", key="full_token"
+    """
     # Kaggle CLI uses these env vars
-    os.environ["KAGGLE_USERNAME"] = username
+    # For modern tokens, username can be empty or any placeholder
+    os.environ["KAGGLE_USERNAME"] = username or "kaggle_token"
     os.environ["KAGGLE_KEY"] = key
-    logger.debug("Kaggle authentication configured")
+    logger.debug(
+        "Kaggle authentication configured (token-based)"
+        if not username
+        else "Kaggle authentication configured (username + key)"
+    )
 
 
 def _download_kaggle_dataset(dataset_id: str, output_path: str) -> int:
@@ -158,57 +227,111 @@ def _download_kaggle_dataset(dataset_id: str, output_path: str) -> int:
         raise
 
 
-def _parse_kaggle_files(dataset_path: str) -> list[dict[str, Any]]:
+def _parse_kaggle_files(
+    dataset_path: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """
-    Parse downloaded Kaggle dataset files.
+    Parse Kaggle newsdata dataset files (JSON format).
 
-    The julianschelb/newsdata dataset ships as JSON files whose schema
-    matches our article model directly (url, title, feed, body, etc.).
-    Only relevant_articles.json is ingested — the other files contain
-    sentence-level and entity data not needed here.
+    Expected files:
+    - relevant_articles.json: article documents
+    - relevant_entities.json: named entities
+    - relevant_sent.json or sentences_matched_entities.json: sentences
+
+    Prioritises relevant_articles.json for article ingestion; falls back to
+    all JSON files in the directory if it is absent.
+
+    Returns tuple of (articles, entities, sentences) lists.
     """
-    import json
-
     articles: list[dict[str, Any]] = []
+    entities: list[dict[str, Any]] = []
+    sentences: list[dict[str, Any]] = []
+
     dataset_dir = Path(dataset_path)
 
     # Use relevant_articles.json as the primary source; fall back to any JSON
     target = dataset_dir / "relevant_articles.json"
     json_files = [target] if target.exists() else list(dataset_dir.glob("*.json"))
+
+    if not json_files:
+        logger.warning("No JSON files found in %s", dataset_path)
+        return articles, entities, sentences
+
     logger.info("Found %d JSON file(s) to parse", len(json_files))
 
     for json_file in json_files:
-        if json_file.stem not in ("relevant_articles",):
-            continue
         logger.info("Parsing %s", json_file.name)
         try:
+            # Try standard JSON first, fall back to JSONL (line-by-line)
             with open(json_file, encoding="utf-8") as f:
-                rows = json.load(f)
-            for row in rows:
-                article = _parse_kaggle_row(row)
-                if article:
-                    articles.append(article)
+                try:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict):
+                        records = data.get("data", data.get("records", [data]))
+                    else:
+                        records = []
+                except json.JSONDecodeError:
+                    f.seek(0)
+                    records = []
+                    for line in f:
+                        if line.strip():
+                            try:
+                                records.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                continue
+
+            if not records:
+                continue
+
+            # Classify records by structure
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+
+                # Articles: have 'title' and ('url' or 'text' or '_id')
+                if "title" in record and ("text" in record or "url" in record or "_id" in record):
+                    article = _parse_article_record(record)
+                    if article:
+                        articles.append(article)
+
+                elif "NE" in record and ("docID" in record or "doc_id" in record):
+                    entity = _parse_entity_record(record)
+                    if entity:
+                        entities.append(entity)
+
+                elif "text" in record and "docID" in record and "senDocID" in record:
+                    sentence = _parse_sentence_record(record)
+                    if sentence:
+                        sentences.append(sentence)
+
         except Exception as e:
-            logger.warning("Failed to parse %s: %s", json_file.name, e)
+            logger.warning("Error processing %s: %s", json_file.name, e)
 
-    logger.info("Parsed total %d articles from all files", len(articles))
-    return articles
+    logger.info(
+        "Parsed %d articles, %d entities, %d sentences",
+        len(articles),
+        len(entities),
+        len(sentences),
+    )
+    return articles, entities, sentences
 
 
-def _parse_kaggle_row(row: dict[str, Any]) -> dict[str, Any] | None:
+def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
     """
     Convert a julianschelb/newsdata JSON record to our article schema.
 
-    The dataset schema already matches our model:
-    _id, url, title, feed, type, pub, ret, lang, refs, sum, body, text
-    Dates are stored as {"$date": "..."} MongoDB extended JSON objects.
+    Handles both legacy format (_id, url, title, feed, body, pub as $date object)
+    and modern format (url/id, title, text/content, publishedAt as ISO string).
     """
     try:
-        url = (row.get("url") or "").strip()
-        title = (row.get("title") or "").strip()
-        body = (row.get("body") or "").strip()
+        # Robust URL and Title extraction
+        url = str(record.get("url") or record.get("_id") or "").strip()
+        title = (record.get("title") or "").strip()
+        body = (record.get("body") or record.get("text") or record.get("content") or "").strip()
 
-        if not url or not title or not body:
+        if not title or not body:
             return None
 
         def _extract_date(val: Any) -> str | None:
@@ -223,22 +346,77 @@ def _parse_kaggle_row(row: dict[str, Any]) -> dict[str, Any] | None:
             except (ValueError, AttributeError):
                 return None
 
+        # Publication date — support both legacy $date objects and plain ISO strings
+        pub_date = _extract_date(record.get("pub") or record.get("publishedAt"))
+        ret_date = _extract_date(record.get("ret")) or datetime.now(timezone.utc).isoformat()
+
+        # Capture Kaggle internal ID for potential joins
+        kaggle_id = record.get("_id") or record.get("id")
+
         return {
             "url": url,
             "title": title,
-            "feed": (row.get("feed") or "Kaggle Dataset").strip(),
-            "type": row.get("type"),
-            "pub": _extract_date(row.get("pub")),
-            "ret": _extract_date(row.get("ret")) or datetime.now(timezone.utc).isoformat(),
-            "lang": row.get("lang") or "en",
+            "feed": (record.get("feed") or "Kaggle Dataset").strip(),
+            "type": (record.get("type") or "news").strip(),
+            "pub": pub_date,
+            "ret": ret_date,
+            "lang": (record.get("lang") or "en").strip(),
             "body": body,
-            "text": (row.get("text") or "").strip(),
-            "refs": row.get("refs") or [],
-            "sum": (row.get("sum") or "").strip(),
+            "text": (record.get("text") or body).strip(),
+            "refs": record.get("refs") or [],
+            "sum": (record.get("sum") or "").strip(),
+            "kaggle_id": kaggle_id,
             "rank": None,
         }
 
-    except (KeyError, AttributeError, TypeError):
+    except Exception as e:
+        logger.debug("Failed to parse article record: %s", e)
+        return None
+
+
+def _parse_entity_record(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse entity from JSON record."""
+    try:
+        docID = str(record.get("docID", "")).strip()
+        senDocID = int(record.get("senDocID", 0))
+        ne = record.get("NE", "").strip()
+        s_sen = int(record.get("sSen", 0))
+        e_sen = int(record.get("eSen", 0))
+
+        if not docID or not ne:
+            return None
+
+        return {
+            "docID": docID,
+            "senDocID": senDocID,
+            "NE": ne,
+            "sSen": s_sen,
+            "eSen": e_sen,
+        }
+
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.debug("Failed to parse entity record: %s", e)
+        return None
+
+
+def _parse_sentence_record(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse sentence from JSON record."""
+    try:
+        docID = str(record.get("docID", "")).strip()
+        senDocID = int(record.get("senDocID", 0))
+        text = record.get("text", "").strip()
+
+        if not docID or not text:
+            return None
+
+        return {
+            "docID": docID,
+            "senDocID": senDocID,
+            "text": text,
+        }
+
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.debug("Failed to parse sentence record: %s", e)
         return None
 
 

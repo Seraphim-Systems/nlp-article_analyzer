@@ -8,6 +8,7 @@ An end-to-end NLP pipeline for scraping, cleaning, classifying, and evaluating n
 
 - **Scraping** — Collect articles from RSS feeds with newspaper3k
 - **Cleaning** — Quality filtering and ranking (0=complete, 1=incomplete, 2=discard)
+- **Preprocessing** — NLP normalization (lowercasing, tokenization, lemmatization, stopword removal) using SpaCy
 - **Classification** (Phase 3) — NLP categorization, entity extraction, sentiment analysis
 - **Evaluation** (Phase 4) — Model performance metrics and baselines
 - **REST API** (Phase 5) — Full query and job management interface
@@ -54,7 +55,7 @@ On first startup, the container can automatically download and ingest the Kaggle
 
 **Prerequisites:**
 - Kaggle account (https://www.kaggle.com/settings/account)
-- Download `kaggle.json` and extract API credentials
+- Download `kaggle.json` from Kaggle API settings
 
 **Setup:**
 
@@ -63,11 +64,13 @@ On first startup, the container can automatically download and ingest the Kaggle
    cp .env.example .env
    ```
 
-2. Edit `.env` and add your Kaggle credentials:
+2. Edit `.env` and add your Kaggle API token:
    ```bash
    KAGGLE_ENABLED=true
-   KAGGLE_USERNAME=your-username
+   # Modern tokens: only paste the API key (no username needed)
    KAGGLE_KEY=your-api-key
+   # Legacy tokens (optional): include username if using old format
+   KAGGLE_USERNAME=
    ```
 
 3. Restart the containers:
@@ -83,7 +86,7 @@ On first startup, the container can automatically download and ingest the Kaggle
 
 The seed will:
 - Download the [newsdata dataset](https://www.kaggle.com/datasets/julianschelb/newsdata)
-- Parse CSV files
+- Parse JSON files
 - Ingest articles into the raw collection
 - Run the cleaning pipeline automatically
 - Start the service
