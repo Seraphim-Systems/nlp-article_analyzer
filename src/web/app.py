@@ -16,7 +16,7 @@ import logging
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,8 @@ class ArticleResponse(BaseModel):
 
 
 class MetricsResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     model_version: str | None = None
     last_updated: str | None = None
     precision: float | None = None

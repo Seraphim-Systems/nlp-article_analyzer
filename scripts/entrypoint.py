@@ -257,6 +257,18 @@ def main() -> int:
             logger.info("Executing: %s", " ".join(cmd))
             return subprocess.call(cmd)
 
+        elif service_arg == "wait":
+            # Container initialized, keep it running (manual job execution)
+            logger.info("Container initialized. Waiting for manual job execution.")
+            logger.info(
+                "Trigger jobs via: docker-compose exec jobs python scripts/run_job.py <job>"
+            )
+            # Keep container alive indefinitely
+            signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+            while True:
+                time.sleep(3600)  # Sleep for 1 hour at a time
+            return 0
+
         elif service_arg == "job":
             # Run a specific job (argument: job scrape/clean/classify/evaluate)
             from jobs import run_job
@@ -277,7 +289,7 @@ def main() -> int:
         else:
             logger.error("Unknown service: %s", service_arg)
             logger.error(
-                "Valid services: api, job <job_name>, scrape, clean, classify, evaluate"
+                "Valid services: api, wait, job <job_name>, scrape, clean, classify, evaluate"
             )
             return 1
 
