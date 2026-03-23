@@ -12,14 +12,19 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import threading
 import uuid
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
@@ -37,6 +42,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 
 _jobs: dict[str, dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -105,6 +111,31 @@ class MetricsResponse(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────
+# Lifespan
+# ──────────────────────────────────────────────────────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    try:
+        from database.init_db import init_databases
+        init_databases()
+        logger.info("Databases initialized on startup")
+    except Exception as e:
+        logger.error("Failed to initialize databases on startup: %s", e)
+        raise
+    yield
+    # Shutdown
+    try:
+        from database.connection import close_connection
+        close_connection()
+        logger.info("MongoDB connection closed on shutdown")
+    except Exception:
+        pass
+
+
+# ──────────────────────────────────────────────────────────────
 # App + CORS
 # ──────────────────────────────────────────────────────────────
 
@@ -112,6 +143,7 @@ app = FastAPI(
     title="NLP Article Analyzer API",
     description="REST API for the NLP article pipeline — scrape, clean, NER, compare",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -127,6 +159,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(exc.body)},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    logger.exception("Unhandled exception on %s %s", request.method, request.url)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -200,17 +249,22 @@ async def get_stats() -> dict:
 
 def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
     """Execute a job in a background thread and record result."""
-    _jobs[job_id]["status"] = "running"
+    with _jobs_lock:
+        _jobs[job_id]["status"] = "running"
     try:
         from jobs import run_job
         result = run_job(job_name, dry_run=dry_run)
-        _jobs[job_id]["status"] = "success" if result.get("status") == "success" else "failed"
-        _jobs[job_id]["result"] = result
+        status = "success" if result.get("status") == "success" else "failed"
+        with _jobs_lock:
+            _jobs[job_id]["status"] = status
+            _jobs[job_id]["result"] = result
     except Exception as e:
-        _jobs[job_id]["status"] = "failed"
-        _jobs[job_id]["result"] = {"error": str(e)}
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["result"] = {"error": str(e)}
     finally:
-        _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        with _jobs_lock:
+            _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
 
 
 @app.post("/jobs/trigger", tags=["jobs"], response_model=JobTriggerResponse)
@@ -221,14 +275,15 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
     job_id = str(uuid.uuid4())[:8]
-    _jobs[job_id] = {
-        "job_id":      job_id,
-        "job_name":    request.job_name,
-        "status":      "queued",
-        "started_at":  datetime.utcnow().isoformat() + "Z",
-        "finished_at": None,
-        "result":      None,
-    }
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "job_id":      job_id,
+            "job_name":    request.job_name,
+            "status":      "queued",
+            "started_at":  datetime.utcnow().isoformat() + "Z",
+            "finished_at": None,
+            "result":      None,
+        }
 
     t = threading.Thread(
         target=_run_job_thread,
@@ -248,16 +303,20 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
 @app.get("/jobs/{job_id}", tags=["jobs"], response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """Poll job status by ID."""
-    job = _jobs.get(job_id)
-    if not job:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        snapshot = dict(job) if job else None
+    if not snapshot:
         raise HTTPException(404, f"Job {job_id} not found")
-    return JobStatusResponse(**job)
+    return JobStatusResponse(**snapshot)
 
 
 @app.get("/jobs", tags=["jobs"])
 async def list_jobs() -> dict:
     """List all tracked jobs (most recent first)."""
-    jobs = sorted(_jobs.values(), key=lambda j: j["started_at"], reverse=True)
+    with _jobs_lock:
+        snapshot = [dict(j) for j in _jobs.values()]
+    jobs = sorted(snapshot, key=lambda j: j["started_at"], reverse=True)
     return {"jobs": jobs[:50]}
 
 
@@ -271,7 +330,7 @@ async def list_articles(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     collection: str = Query("clean", pattern="^(clean|ner)$"),
-    search: str | None = None,
+    search: str | None = Query(None, max_length=100),
 ) -> dict:
     """Paginated article list from clean or ner collection."""
     from database.repositories import get_clean_collection, get_ner_collection
@@ -280,9 +339,10 @@ async def list_articles(
 
     query: dict = {}
     if search:
+        safe_search = re.escape(search)
         query["$or"] = [
-            {"title": {"$regex": search, "$options": "i"}},
-            {"feed": {"$regex": search, "$options": "i"}},
+            {"title": {"$regex": safe_search, "$options": "i"}},
+            {"feed": {"$regex": safe_search, "$options": "i"}},
         ]
 
     total = col.count_documents(query)
@@ -438,16 +498,3 @@ async def get_metrics() -> MetricsResponse:
     return MetricsResponse()
 
 
-# ──────────────────────────────────────────────────────────────
-# Startup
-# ──────────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    try:
-        from database.init_db import init_databases
-        init_databases()
-        logger.info("Databases initialized on startup")
-    except Exception as e:
-        logger.error("Failed to initialize databases: %s", e)
-        raise

@@ -166,7 +166,7 @@ class Settings:
 
     #: Enable Kaggle dataset download on container init
     KAGGLE_ENABLED: bool = field(
-        default_factory=lambda: _env("KAGGLE_ENABLED", "false").lower() == "true"
+        default_factory=lambda: _env_bool("KAGGLE_ENABLED", False)
     )
 
     #: Kaggle dataset identifier (e.g., "julianschelb/newsdata")
@@ -187,13 +187,28 @@ class Settings:
 
     #: Skip bootstrap on container init (useful for production after initial run)
     SKIP_BOOTSTRAP: bool = field(
-        default_factory=lambda: _env("SKIP_BOOTSTRAP", "false").lower() == "true"
+        default_factory=lambda: _env_bool("SKIP_BOOTSTRAP", False)
     )
 
     #: Skip Rank-1 URL re-fetch during cleaning (useful for historical datasets with dead links)
     SKIP_RANK1_RECOVERY: bool = field(
-        default_factory=lambda: _env("SKIP_RANK1_RECOVERY", "false").lower() == "true"
+        default_factory=lambda: _env_bool("SKIP_RANK1_RECOVERY", False)
     )
+
+    def validate(self) -> None:
+        """
+        Raise EnvironmentError if required settings are missing.
+        Called at container startup — surfaces misconfiguration immediately.
+        """
+        errors = []
+        if not self.MONGO_URI:
+            errors.append("MONGO_URI is required")
+        if self.KAGGLE_ENABLED and not self.KAGGLE_KEY:
+            errors.append("KAGGLE_KEY is required when KAGGLE_ENABLED=true")
+        if errors:
+            raise EnvironmentError(
+                "Missing required configuration:\n  " + "\n  ".join(errors)
+            )
 
 
 # Singleton instance used throughout the project
