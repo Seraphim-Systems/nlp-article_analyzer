@@ -400,12 +400,12 @@ docker-compose -f docker-compose.prod.yml exec mongodb mongodump --out /backup
 │                 │                              │
 │       ┌─────────┼─────────┬──────────┐         │
 │       ▼         ▼         ▼          ▼         │
-│  ┌─────────┐ ┌──────────────┐ ┌──────────┐   │
-│  │ MongoDB │ │ API Service  │ │  Jobs    │   │
-│  │ :27017  │ │ :80          │ │ Service  │   │
-│  │(exposed)│ │ (no exposed  │ │ (no port)│   │
-│  │         │ │  port)       │ │          │   │
-│  └─────────┘ └──────────────┘ └──────────┘   │
+│  ┌─────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────┐   │
+│  │ MongoDB │ │ API Service  │ │   Frontend   │ │  Jobs    │   │
+│  │ :27017  │ │ :80          │ │   Dashboard  │ │ Service  │   │
+│  │(exposed)│ │ (no exposed  │ │   :3000      │ │ (no port)│   │
+│  │         │ │  port)       │ │   (exposed)  │ │          │   │
+│  └─────────┘ └──────────────┘ └──────────────┘ └──────────┘   │
 │                                                 │
 │  Vol: /mnt/nlp_data/mongo                      │
 └─────────────────────────────────────────────────┘

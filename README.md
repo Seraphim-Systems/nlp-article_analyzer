@@ -9,6 +9,7 @@ An end-to-end NLP pipeline for scraping, cleaning, classifying, and evaluating n
 - **Scraping** — Collect articles from RSS feeds with newspaper3k
 - **Cleaning** — Quality filtering and ranking (0=complete, 1=incomplete, 2=discard)
 - **Preprocessing** — NLP normalization (lowercasing, tokenization, lemmatization, stopword removal) using SpaCy
+- **Visualization Dashboard** — React-based web app for data monitoring and health status
 - **Classification** (Phase 3) — NLP categorization, entity extraction, sentiment analysis
 - **Evaluation** (Phase 4) — Model performance metrics and baselines
 - **REST API** (Phase 5) — Full query and job management interface
@@ -29,7 +30,7 @@ An end-to-end NLP pipeline for scraping, cleaning, classifying, and evaluating n
 # Clone and enter project directory
 cd nlp-article_analyzer
 
-# Start services (MongoDB, API, job runner)
+# Start services (MongoDB, API, job runner, frontend)
 docker-compose up -d
 
 # Verify services
@@ -39,15 +40,13 @@ docker-compose ps
 docker-compose logs -f api
 ```
 
-### Test the API
+### Access the Dashboard
 
-```bash
-# Health check
-curl http://localhost:8000/health
+Once the services are running, you can access the visualization dashboard in your browser:
 
-# API documentation (interactive)
-open http://localhost:8000/docs
-```
+- **Dashboard**: [http://localhost:3000](http://localhost:3000)
+- **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **API Health**: [http://localhost:8000/health](http://localhost:8000/health)
 
 ### Bootstrap with Kaggle Dataset (Optional)
 
@@ -143,6 +142,7 @@ EOF
 ├────────────────────────────────────┤
 │ • MongoDB (port 27017)             │
 │ • API Service (port 8000)          │
+│ • Frontend Dashboard (port 3000)   │
 │ • Job Runner                       │
 │ ← Volume mounts for hot reload     │
 └────────────────────────────────────┘
