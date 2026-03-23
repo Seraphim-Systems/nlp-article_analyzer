@@ -192,7 +192,7 @@ class Settings:
 
     #: Skip Rank-1 URL re-fetch during cleaning (useful for historical datasets with dead links)
     SKIP_RANK1_RECOVERY: bool = field(
-        default_factory=lambda: _env("SKIP_RANK1_RECOVERY", "false").lower() == "true"
+        default_factory=lambda: _env_bool("SKIP_RANK1_RECOVERY", False)
     )
 
     def validate(self) -> None:
