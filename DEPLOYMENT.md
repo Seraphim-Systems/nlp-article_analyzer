@@ -182,11 +182,12 @@ To enable automated deployment, configure the following in your GitHub repositor
 
 #### Secrets
 - `HETZNER_KEY`: Your SSH private key used to access the server.
-
-#### Variables
 - `HETZNER_IP`: The public IP address of your server.
 - `HETZNER_USER`: The SSH username (e.g., `root` or `deploy`).
 - `HETZNER_PORT`: (Optional) The SSH port. Defaults to `22`.
+
+#### Variables
+- (Currently none required for base deployment; can be used for environment-specific configs)
 
 ### Deployment Flow
 

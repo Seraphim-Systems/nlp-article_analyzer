@@ -4,21 +4,23 @@ on:
   workflow_call:
     inputs:
       deploy_path:
+        description: "Target directory on the server"
         required: false
         type: string
         default: "~/nlp-project"
       environment:
+        description: "GitHub environment name"
         required: false
         type: string
         default: "production"
     secrets:
-      server_ip:
+      HETZNER_IP:
         required: true
-      server_user:
+      HETZNER_USER:
         required: true
-      server_port:
+      HETZNER_PORT:
         required: false
-      SSH_PRIVATE_KEY:
+      HETZNER_KEY:
         required: true
 
 jobs:
@@ -26,38 +28,38 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - name: Execute Remote SSH Commands
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.server_ip }}
-          username: ${{ secrets.server_user }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.server_port || '22' }}
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
           script: |
-            # 1. Create/Navigate to deploy directory
+            set -e
+            echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
+            
+            # 1. Prepare directory
             mkdir -p ${{ inputs.deploy_path }}
             cd ${{ inputs.deploy_path }}
 
-            # 2. Sync Repository
+            # 2. Sync Code
             if [ ! -d ".git" ]; then
-              echo "Repository not found, cloning..."
               git clone https://github.com/${{ github.repository }}.git .
             else
-              echo "Repository exists, pulling latest changes..."
               git fetch --all
               git reset --hard origin/${{ github.ref_name }}
             fi
 
-            # 3. Pull/Build and Start Services
-            if [ -f "docker-compose.prod.yml" ]; then
-              echo "Building and starting services using production config..."
-              docker compose -f docker-compose.prod.yml build
-              docker compose -f docker-compose.prod.yml up -d
-            else
-              echo "Production config not found, using default docker-compose..."
-              docker compose build
-              docker compose up -d
-            fi
+            # 3. Identify Compose File
+            COMPOSE_FILE="docker-compose.yml"
+            [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
+            echo "Using config: $COMPOSE_FILE"
 
-            # 4. Cleanup old images
+            # 4. Orchestrate
+            docker compose -f $COMPOSE_FILE build
+            docker compose -f $COMPOSE_FILE up -d
+
+            # 5. Housekeeping
             docker image prune -f
+            echo "--- Deployment Successful ---"

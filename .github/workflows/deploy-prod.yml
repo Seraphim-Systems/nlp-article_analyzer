@@ -7,13 +7,9 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  call-reusable-deploy:
+  production-deploy:
     uses: ./.github/workflows/reusable-deploy.yml
     with:
-      server_ip: ${{ vars.HETZNER_IP }}
-      server_user: ${{ vars.HETZNER_USER }}
-      server_port: ${{ vars.HETZNER_PORT || '22' }}
       deploy_path: "~/nlp-project"
       environment: "production"
-    secrets:
-      SSH_PRIVATE_KEY: ${{ secrets.HETZNER_KEY }}
+    secrets: inherit
