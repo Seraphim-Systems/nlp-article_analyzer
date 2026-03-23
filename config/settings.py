@@ -39,13 +39,21 @@ class Settings:
     )
 
     #: Name of the raw (uncleaned) database
-    RAW_DB_NAME: str = field(
-        default_factory=lambda: _env("RAW_DB_NAME", "nlp_raw")
-    )
+    RAW_DB_NAME: str = field(default_factory=lambda: _env("RAW_DB_NAME", "nlp_raw"))
 
     #: Name of the clean database
     CLEAN_DB_NAME: str = field(
         default_factory=lambda: _env("CLEAN_DB_NAME", "nlp_clean")
+    )
+
+    #: Name of the classified articles database
+    CLASSIFIED_DB_NAME: str = field(
+        default_factory=lambda: _env("CLASSIFIED_DB_NAME", "nlp_classified")
+    )
+
+    #: Name of the models and metrics database
+    MODELS_DB_NAME: str = field(
+        default_factory=lambda: _env("MODELS_DB_NAME", "nlp_models")
     )
 
     #: Collection name within each database
@@ -55,6 +63,9 @@ class Settings:
     CLEAN_COLLECTION: str = field(
         default_factory=lambda: _env("CLEAN_COLLECTION", "articles")
     )
+    CLASSIFIED_COLLECTION: str = field(
+        default_factory=lambda: _env("CLASSIFIED_COLLECTION", "articles")
+    )
 
     # ------------------------------------------------------------------
     # Scheduler
@@ -62,7 +73,7 @@ class Settings:
 
     #: UTC hour at which the daily scrape job runs (0–23)
     SCRAPE_HOUR: int = field(
-        default_factory=lambda: _env_int("SCRAPE_HOUR", 0)   # midnight
+        default_factory=lambda: _env_int("SCRAPE_HOUR", 0)  # midnight
     )
 
     # ------------------------------------------------------------------
@@ -77,43 +88,75 @@ class Settings:
     # Add, remove, or swap feeds here without touching scraper code.
     # ------------------------------------------------------------------
 
-    RSS_FEEDS: list[dict[str, Any]] = field(default_factory=lambda: [
-        {
-            "name": "BBC News - World",
-            "url":  "http://feeds.bbci.co.uk/news/world/rss.xml",
-            "lang": "en",
-        },
-        {
-            "name": "BBC News - Politics",
-            "url":  "http://feeds.bbci.co.uk/news/politics/rss.xml",
-            "lang": "en",
-        },
-        {
-            "name": "Reuters - World",
-            "url":  "https://feeds.reuters.com/reuters/worldNews",
-            "lang": "en",
-        },
-        {
-            "name": "The Hindu",
-            "url":  "https://www.thehindu.com/feeder/default.rss",
-            "lang": "en",
-        },
-        {
-            "name": "NDTV",
-            "url":  "https://feeds.feedburner.com/ndtvnews-top-stories",
-            "lang": "en",
-        },
-        {
-            "name": "Al Jazeera English",
-            "url":  "https://www.aljazeera.com/xml/rss/all.xml",
-            "lang": "en",
-        },
-        {
-            "name": "Times of India",
-            "url":  "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-            "lang": "en",
-        },
-    ])
+    RSS_FEEDS: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {
+                "name": "BBC News - World",
+                "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+                "lang": "en",
+            },
+            {
+                "name": "BBC News - Politics",
+                "url": "http://feeds.bbci.co.uk/news/politics/rss.xml",
+                "lang": "en",
+            },
+            {
+                "name": "Reuters - World",
+                "url": "https://feeds.reuters.com/reuters/worldNews",
+                "lang": "en",
+            },
+            {
+                "name": "The Hindu",
+                "url": "https://www.thehindu.com/feeder/default.rss",
+                "lang": "en",
+            },
+            {
+                "name": "NDTV",
+                "url": "https://feeds.feedburner.com/ndtvnews-top-stories",
+                "lang": "en",
+            },
+            {
+                "name": "Al Jazeera English",
+                "url": "https://www.aljazeera.com/xml/rss/all.xml",
+                "lang": "en",
+            },
+            {
+                "name": "Times of India",
+                "url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+                "lang": "en",
+            },
+        ]
+    )
+
+    # ------------------------------------------------------------------
+    # Kaggle Dataset (for initial bootstrap)
+    # ------------------------------------------------------------------
+
+    #: Enable Kaggle dataset download on container init
+    KAGGLE_ENABLED: bool = field(
+        default_factory=lambda: _env("KAGGLE_ENABLED", "false").lower() == "true"
+    )
+
+    #: Kaggle dataset identifier (e.g., "julianschelb/newsdata")
+    KAGGLE_DATASET: str = field(
+        default_factory=lambda: _env("KAGGLE_DATASET", "julianschelb/newsdata")
+    )
+
+    #: Kaggle API username (set via .env)
+    KAGGLE_USERNAME: str = field(default_factory=lambda: _env("KAGGLE_USERNAME", ""))
+
+    #: Kaggle API key (set via .env)
+    KAGGLE_KEY: str = field(default_factory=lambda: _env("KAGGLE_KEY", ""))
+
+    #: Local path to store Kaggle dataset downloads
+    KAGGLE_DOWNLOAD_PATH: str = field(
+        default_factory=lambda: _env("KAGGLE_DOWNLOAD_PATH", "/tmp/kaggle_datasets")
+    )
+
+    #: Skip bootstrap on container init (useful for production after initial run)
+    SKIP_BOOTSTRAP: bool = field(
+        default_factory=lambda: _env("SKIP_BOOTSTRAP", "false").lower() == "true"
+    )
 
 
 # Singleton instance used throughout the project

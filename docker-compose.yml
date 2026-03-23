@@ -1,22 +1,125 @@
 version: "3.9"
 
-# MongoDB is a LOCAL INSTALL on the host machine — it is NOT containerised here.
-# Make sure MongoDB is running locally on port 27017 before starting this stack.
+# ──────────────────────────────────────────────────────────────────────────
+# LOCAL DEVELOPMENT SETUP
+# ──────────────────────────────────────────────────────────────────────────
+# 
+# This compose stack is optimized for local development:
+# - Single MongoDB service with attached volumes
+# - Job runner for manual/scheduled job execution
+# - FastAPI service for testing REST endpoints
+# - Services depend on MongoDB health checks
 #
-# Windows / Mac (Docker Desktop): host.docker.internal resolves to the host automatically.
-# Linux: the extra_hosts entry below maps host.docker.internal to the host gateway.
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose logs -f api        # Follow API logs
+#   docker-compose exec mongodb mongosh  # Connect to MongoDB
+#   docker-compose down               # Stop and clean
+#
+# For production, use docker-compose.prod.yml instead.
+
+volumes:
+  mongo_data:
+    driver: local
 
 services:
-  # ── Daily pipeline runner (scrape + clean) ──────────────────────────────
-  pipeline:
-    build: .
-    container_name: nlp_pipeline
+  # ── MongoDB database (containerized local instance) ─────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: nlp_mongodb_dev
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"   # Linux only; harmless on Win/Mac
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
     environment:
-      MONGO_URI: mongodb://host.docker.internal:27017
+      MONGO_INITDB_DATABASE: admin
+    healthcheck:
+      test: 
+        - CMD
+        - python3
+        - -c
+        - "import socket; socket.create_connection(('localhost', 27017), timeout=2)"
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Job scheduler / pipeline runner ──────────────────────────────────────
+  jobs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nlp_jobs_dev
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw
       CLEAN_DB_NAME: nlp_clean
-      SCRAPE_HOUR: "0"
-    command: python scripts/run_daily.py
+      CLASSIFIED_DB_NAME: nlp_classified
+      MODELS_DB_NAME: nlp_models
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: INFO
+      KAGGLE_ENABLED: "false"
+      SKIP_BOOTSTRAP: "false"
+    # Entrypoint handles init + bootstrap, CMD specifies which job to run
+    command: job scrape
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - nlp_network
+
+  # ── FastAPI web service (REST API) ───────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nlp_api_dev
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "8000:80"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      RAW_DB_NAME: nlp_raw
+      CLEAN_DB_NAME: nlp_clean
+      CLASSIFIED_DB_NAME: nlp_classified
+      MODELS_DB_NAME: nlp_models
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: INFO
+      KAGGLE_ENABLED: "false"
+      SKIP_BOOTSTRAP: "false"
+    # Entrypoint handles init + bootstrap, CMD specifies 'api' service
+    command: api
+    volumes:
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - nlp_network
+
+networks:
+  nlp_network:
+    driver: bridge

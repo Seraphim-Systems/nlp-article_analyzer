@@ -5,6 +5,7 @@ WORKDIR /app
 # Install system dependencies required by newspaper3k / lxml
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2-dev libxslt1-dev libjpeg-dev zlib1g-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -16,5 +17,10 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('s
 COPY . .
 
 ENV PYTHONPATH=/app/src:/app
+ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "scripts/run_daily.py"]
+# Entrypoint handles initialization and service startup
+ENTRYPOINT ["python", "scripts/entrypoint.py"]
+# Default service (overridable via docker-compose CMD)
+CMD ["api"]
+

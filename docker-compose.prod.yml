@@ -1,0 +1,191 @@
+# ──────────────────────────────────────────────────────────────────────────
+# PRODUCTION DEPLOYMENT SETUP
+# ──────────────────────────────────────────────────────────────────────────
+#
+# This compose stack is optimized for production deployment:
+# - MongoDB with persistent volumes and backups
+# - All services connect to external proxy network
+# - Resource limits applied to all containers
+# - Logging to central aggregation (optional)
+# - Health checks for service recovery
+# - No host volume mounts (secure)
+#
+# Prerequisites:
+#   - External Docker network must exist:
+#     docker network create --driver bridge nlp_proxy_network
+#
+# Usage:
+#   docker-compose -f docker-compose.prod.yml up -d
+#   docker-compose -f docker-compose.prod.yml logs -f api
+#   docker-compose -f docker-compose.prod.yml down
+#
+# For local development, use docker-compose.yml instead.
+
+version: "3.9"
+
+volumes:
+  mongo_data_prod:
+    driver: local
+    driver_opts:
+      # Optional: configure backup location
+      type: none
+      o: bind
+      device: /mnt/nlp_data/mongo
+
+services:
+  # ── MongoDB database (production instance) ──────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: nlp_mongodb_prod
+    restart: always
+    # Connect to external proxy network
+    networks:
+      - nlp_proxy_network
+    volumes:
+      - mongo_data_prod:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: admin
+      # Optional: Enable auth in production
+      # MONGO_INITDB_ROOT_USERNAME: admin
+      # MONGO_INITDB_ROOT_PASSWORD: <secure-password>
+    healthcheck:
+      test: 
+        - CMD
+        - python3
+        - -c
+        - "import socket; socket.create_connection(('localhost', 27017), timeout=2)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=mongodb"
+
+  # ── Job scheduler / pipeline runner ──────────────────────────────────────
+  # Runs scheduled jobs for scraping, cleaning, classification, evaluation
+  jobs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nlp-analyzer:latest
+    container_name: nlp_jobs_prod
+    restart: always
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - nlp_proxy_network
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      RAW_DB_NAME: nlp_raw
+      CLEAN_DB_NAME: nlp_clean
+      CLASSIFIED_DB_NAME: nlp_classified
+      MODELS_DB_NAME: nlp_models
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: INFO
+      # Kaggle bootstrap (set in .env if needed)
+      KAGGLE_ENABLED: "false"
+      SKIP_BOOTSTRAP: "true"
+    # Entrypoint handles init + bootstrap, CMD specifies which job to run
+    # (orchestrated externally via cron/K8s)
+    command: job scrape
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=jobs"
+
+  # ── FastAPI web service (REST API) ──────────────────────────────────────
+  # Serves REST endpoints for article queries, job management, metrics
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nlp-analyzer:latest
+    container_name: nlp_api_prod
+    restart: always
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - nlp_proxy_network
+    environment:
+      MONGO_URI: mongodb://mongodb:27017
+      RAW_DB_NAME: nlp_raw
+      CLEAN_DB_NAME: nlp_clean
+      CLASSIFIED_DB_NAME: nlp_classified
+      MODELS_DB_NAME: nlp_models
+      PYTHONUNBUFFERED: "1"
+      LOG_LEVEL: INFO
+      # Kaggle bootstrap (disabled in production after initial setup)
+      KAGGLE_ENABLED: "false"
+      SKIP_BOOTSTRAP: "true"
+      # Optional: APM (Application Performance Monitoring)
+      # SENTRY_DSN: https://...
+    # Entrypoint handles init, CMD specifies 'api' service
+    command: api
+    expose:
+      - "80"
+    # Note: No direct port mapping! Access via proxy network only.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      replicas: 1
+      # Optional: load balancing endpoint
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.nlp-api.rule=Host(`api.example.com`)"
+        - "traefik.http.services.nlp-api.loadbalancer.server.port=80"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=api"
+
+# ──────────────────────────────────────────────────────────────────────────
+# EXTERNAL NETWORK
+# ──────────────────────────────────────────────────────────────────────────
+# 
+# Connects to an external Docker network (e.g., managed by Traefik/nginx proxy).
+# This allows the proxy to route requests to the api service without exposing
+# container ports directly.
+#
+# Create the network:
+#   docker network create --driver bridge nlp_proxy_network
+#
+# Or if using Traefik:
+#   docker network create --driver bridge traefik_network
+#   # Then update network name below
+
+networks:
+  nlp_proxy_network:
+    external: true
+    name: nlp_proxy_network
