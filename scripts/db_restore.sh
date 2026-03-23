@@ -44,6 +44,12 @@ tar -xzf "${ARCHIVE}" -C "${EXTRACT_DIR}"
 # Find the inner dump folder
 INNER=$(find "${EXTRACT_DIR}" -mindepth 1 -maxdepth 1 -type d | head -1)
 
+if [[ -z "${INNER}" ]]; then
+  echo "  ERROR: No dump directory found inside archive. Archive may be corrupted."
+  rm -rf "${EXTRACT_DIR}"
+  exit 1
+fi
+
 # Copy to container
 docker cp "${INNER}" "${CONTAINER}:${CONTAINER_PATH}"
 

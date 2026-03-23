@@ -166,7 +166,7 @@ class Settings:
 
     #: Enable Kaggle dataset download on container init
     KAGGLE_ENABLED: bool = field(
-        default_factory=lambda: _env("KAGGLE_ENABLED", "false").lower() == "true"
+        default_factory=lambda: _env_bool("KAGGLE_ENABLED", False)
     )
 
     #: Kaggle dataset identifier (e.g., "julianschelb/newsdata")
@@ -187,7 +187,7 @@ class Settings:
 
     #: Skip bootstrap on container init (useful for production after initial run)
     SKIP_BOOTSTRAP: bool = field(
-        default_factory=lambda: _env("SKIP_BOOTSTRAP", "false").lower() == "true"
+        default_factory=lambda: _env_bool("SKIP_BOOTSTRAP", False)
     )
 
     #: Skip Rank-1 URL re-fetch during cleaning (useful for historical datasets with dead links)

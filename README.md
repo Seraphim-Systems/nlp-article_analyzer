@@ -123,14 +123,14 @@ MongoDB must be running (`docker compose up -d mongodb`) before the native proce
 Scripts use `mongodump` / `mongorestore` against the running container.
 
 ```bash
-# Dump all NLP databases to ./dump/
+# Dump all databases to ~/Downloads/ (prints the filename on completion)
 bash scripts/db_dump.sh
 
-# Restore from ./dump/ into the running MongoDB container
-bash scripts/db_restore.sh
+# Restore from a specific archive
+bash scripts/db_restore.sh ~/Downloads/nlp_mongo_dump_YYYYMMDD_HHMMSS.tar.gz
 ```
 
-`db_dump.sh` targets the `nlp_raw`, `nlp_clean`, and `nlp_ner` databases by default and writes BSON archives to `./dump/`. `db_restore.sh` reads from that same directory and replays them into the container — safe to run on an empty or populated instance.
+`db_dump.sh` runs `mongodump` against the running container and compresses the output to a dated `.tar.gz` in `~/Downloads/` (or a custom path passed as the first argument). `db_restore.sh` takes the archive path, extracts it, and runs `mongorestore --drop` inside the container — existing data is overwritten.
 
 ---
 

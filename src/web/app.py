@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import threading
 import uuid
 from collections import defaultdict
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 
 _jobs: dict[str, dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -247,17 +249,22 @@ async def get_stats() -> dict:
 
 def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
     """Execute a job in a background thread and record result."""
-    _jobs[job_id]["status"] = "running"
+    with _jobs_lock:
+        _jobs[job_id]["status"] = "running"
     try:
         from jobs import run_job
         result = run_job(job_name, dry_run=dry_run)
-        _jobs[job_id]["status"] = "success" if result.get("status") == "success" else "failed"
-        _jobs[job_id]["result"] = result
+        status = "success" if result.get("status") == "success" else "failed"
+        with _jobs_lock:
+            _jobs[job_id]["status"] = status
+            _jobs[job_id]["result"] = result
     except Exception as e:
-        _jobs[job_id]["status"] = "failed"
-        _jobs[job_id]["result"] = {"error": str(e)}
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["result"] = {"error": str(e)}
     finally:
-        _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        with _jobs_lock:
+            _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
 
 
 @app.post("/jobs/trigger", tags=["jobs"], response_model=JobTriggerResponse)
@@ -318,7 +325,7 @@ async def list_articles(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     collection: str = Query("clean", pattern="^(clean|ner)$"),
-    search: str | None = None,
+    search: str | None = Query(None, max_length=100),
 ) -> dict:
     """Paginated article list from clean or ner collection."""
     from database.repositories import get_clean_collection, get_ner_collection
@@ -327,9 +334,10 @@ async def list_articles(
 
     query: dict = {}
     if search:
+        safe_search = re.escape(search)
         query["$or"] = [
-            {"title": {"$regex": search, "$options": "i"}},
-            {"feed": {"$regex": search, "$options": "i"}},
+            {"title": {"$regex": safe_search, "$options": "i"}},
+            {"feed": {"$regex": safe_search, "$options": "i"}},
         ]
 
     total = col.count_documents(query)
