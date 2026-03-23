@@ -58,6 +58,7 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    env_file: .env
     environment:
       MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw
@@ -96,6 +97,7 @@ services:
         condition: service_healthy
     ports:
       - "8000:80"
+    env_file: .env
     environment:
       MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw

@@ -15,7 +15,15 @@ from pymongo.database import Database
 
 from config.settings import settings
 from database.connection import get_client, get_raw_db, get_clean_db
-from database.models import ARTICLE_VALIDATOR, RAW_INDEXES, CLEAN_INDEXES
+from database.models import (
+    ARTICLE_VALIDATOR,
+    RAW_INDEXES,
+    CLEAN_INDEXES,
+    ENTITY_VALIDATOR,
+    ENTITY_INDEXES,
+    SENTENCE_VALIDATOR,
+    SENTENCE_INDEXES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +82,22 @@ def init_databases() -> None:
         settings.RAW_COLLECTION,
         ARTICLE_VALIDATOR,
         RAW_INDEXES,
+    )
+
+    # Named entities collection (from Kaggle dataset)
+    _ensure_collection(
+        raw_db,
+        "entities",
+        ENTITY_VALIDATOR,
+        ENTITY_INDEXES,
+    )
+
+    # Sentences collection (from Kaggle dataset)
+    _ensure_collection(
+        raw_db,
+        "sentences",
+        SENTENCE_VALIDATOR,
+        SENTENCE_INDEXES,
     )
 
     # Clean articles database

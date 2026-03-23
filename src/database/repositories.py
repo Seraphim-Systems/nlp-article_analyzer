@@ -1,9 +1,11 @@
 """
-Repository layer — all MongoDB read/write operations for articles.
+Repository layer - all MongoDB read/write operations for articles, entities, and sentences.
 
-Uses two separate collections:
-  - raw_articles  (in RAW_DB)  : articles as scraped, never mutated after insert
-  - clean_articles (in CLEAN_DB): articles that survived the cleaning pipeline
+Uses multiple collections:
+  - raw_articles      (in RAW_DB)  : articles as scraped, never mutated after insert
+  - clean_articles    (in CLEAN_DB): articles that survived the cleaning pipeline
+  - entities          (in RAW_DB)  : named entities extracted from articles
+  - sentences         (in RAW_DB)  : sentences extracted from articles
 """
 
 from __future__ import annotations
@@ -22,6 +24,10 @@ from database.models import (
     ARTICLE_VALIDATOR,
     CLEAN_INDEXES,
     RAW_INDEXES,
+    ENTITY_VALIDATOR,
+    ENTITY_INDEXES,
+    SENTENCE_VALIDATOR,
+    SENTENCE_INDEXES,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +35,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Collection accessors (lazy — only touch DB when first called)
 # ---------------------------------------------------------------------------
+
 
 def _ensure_collection(db, name: str, validator, indexes) -> Collection:
     """Create collection with schema validation + indexes if it doesn't exist."""
@@ -38,7 +45,7 @@ def _ensure_collection(db, name: str, validator, indexes) -> Collection:
         db.create_collection(
             name,
             validator=validator,
-            validationLevel="moderate",   # warn but don't hard-reject on update
+            validationLevel="moderate",  # warn but don't hard-reject on update
             validationAction="warn",
         )
     col = db[name]
@@ -66,18 +73,30 @@ def get_clean_collection() -> Collection:
     )
 
 
-def get_quarantine_collection() -> Collection:
+def get_entities_collection() -> Collection:
+    """Get or create the entities collection in RAW_DB."""
     return _ensure_collection(
         get_raw_db(),
-        f"{settings.RAW_COLLECTION}_quarantine",
-        ARTICLE_VALIDATOR,
-        RAW_INDEXES,
+        "entities",
+        ENTITY_VALIDATOR,
+        ENTITY_INDEXES,
+    )
+
+
+def get_sentences_collection() -> Collection:
+    """Get or create the sentences collection in RAW_DB."""
+    return _ensure_collection(
+        get_raw_db(),
+        "sentences",
+        SENTENCE_VALIDATOR,
+        SENTENCE_INDEXES,
     )
 
 
 # ---------------------------------------------------------------------------
 # Raw-collection operations
 # ---------------------------------------------------------------------------
+
 
 def insert_raw_articles(articles: list[dict[str, Any]]) -> int:
     """
@@ -94,8 +113,7 @@ def insert_raw_articles(articles: list[dict[str, Any]]) -> int:
         a.setdefault("ret", now_iso)
 
     ops = [
-        UpdateOne({"url": a["url"]}, {"$setOnInsert": a}, upsert=True)
-        for a in articles
+        UpdateOne({"url": a["url"]}, {"$setOnInsert": a}, upsert=True) for a in articles
     ]
     try:
         result = col.bulk_write(ops, ordered=False)
@@ -160,6 +178,7 @@ def upsert_quarantine_articles(articles: list[dict[str, Any]]) -> int:
 # Clean-collection operations
 # ---------------------------------------------------------------------------
 
+
 def upsert_clean_articles(articles: list[dict[str, Any]]) -> int:
     """
     Insert or update articles in the clean collection.
@@ -193,6 +212,77 @@ def count_clean_articles() -> int:
 def count_raw_articles_by_rank() -> dict[int, int]:
     pipeline = [{"$group": {"_id": "$rank", "count": {"$sum": 1}}}]
     return {
-        doc["_id"]: doc["count"]
-        for doc in get_raw_collection().aggregate(pipeline)
+        doc["_id"]: doc["count"] for doc in get_raw_collection().aggregate(pipeline)
     }
+
+
+# ---------------------------------------------------------------------------
+# Entity operations
+# ---------------------------------------------------------------------------
+
+
+def insert_entities(entities: list[dict[str, Any]]) -> int:
+    """
+    Bulk-insert named entities into the entities collection.
+    Skips duplicate (docID, senDocID, NE) combinations.
+    Returns number of newly inserted documents.
+    """
+    if not entities:
+        return 0
+
+    col = get_entities_collection()
+    ops = [
+        UpdateOne(
+            {
+                "docID": e["docID"],
+                "senDocID": e["senDocID"],
+                "NE": e["NE"],
+            },
+            {"$setOnInsert": e},
+            upsert=True,
+        )
+        for e in entities
+    ]
+    try:
+        result = col.bulk_write(ops, ordered=False)
+        inserted = result.upserted_count
+    except BulkWriteError as exc:
+        inserted = exc.details.get("nUpserted", 0)
+        logger.warning("Entity bulk write partial error: %s", exc.details)
+
+    logger.info("Inserted %d new entities (skipped duplicates).", inserted)
+    return inserted
+
+
+# ---------------------------------------------------------------------------
+# Sentence operations
+# ---------------------------------------------------------------------------
+
+
+def insert_sentences(sentences: list[dict[str, Any]]) -> int:
+    """
+    Bulk-insert sentences into the sentences collection.
+    Uses (docID, senDocID) as unique constraint per the schema.
+    Returns number of newly inserted documents.
+    """
+    if not sentences:
+        return 0
+
+    col = get_sentences_collection()
+    ops = [
+        UpdateOne(
+            {"docID": s["docID"], "senDocID": s["senDocID"]},
+            {"$setOnInsert": s},
+            upsert=True,
+        )
+        for s in sentences
+    ]
+    try:
+        result = col.bulk_write(ops, ordered=False)
+        inserted = result.upserted_count
+    except BulkWriteError as exc:
+        inserted = exc.details.get("nUpserted", 0)
+        logger.warning("Sentence bulk write partial error: %s", exc.details)
+
+    logger.info("Inserted %d new sentences (skipped duplicates).", inserted)
+    return inserted

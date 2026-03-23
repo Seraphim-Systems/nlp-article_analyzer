@@ -125,9 +125,11 @@ def bootstrap_from_kaggle() -> bool:
         logger.info("Kaggle bootstrap disabled (KAGGLE_ENABLED=false)")
         return True
 
-    if not settings.KAGGLE_USERNAME or not settings.KAGGLE_KEY:
-        logger.warning("Kaggle bootstrap enabled but credentials not provided")
-        logger.warning("  Set KAGGLE_USERNAME and KAGGLE_KEY in .env to enable")
+    if not settings.KAGGLE_KEY:
+        logger.warning("Kaggle bootstrap enabled but API key not provided")
+        logger.warning(
+            "  Set KAGGLE_KEY in .env to enable (modern tokens only require the key)"
+        )
         return True  # Not an error, just skip
 
     logger.info("Starting Kaggle dataset bootstrap…")
@@ -140,14 +142,22 @@ def bootstrap_from_kaggle() -> bool:
             logger.error("Kaggle ingestion failed: %s", ingestion_result["errors"])
             return False
 
-        logger.info(
-            "✓ Ingestion complete: parsed=%d, inserted=%d",
-            ingestion_result["parsed"],
-            ingestion_result["inserted"],
+        # Sum all inserted documents (articles + entities + sentences)
+        total_inserted = (
+            ingestion_result.get("inserted_articles", 0)
+            + ingestion_result.get("inserted_entities", 0)
+            + ingestion_result.get("inserted_sentences", 0)
         )
 
-        if ingestion_result["inserted"] == 0:
-            logger.warning("No articles were inserted; skipping cleaning pipeline")
+        logger.info(
+            "✓ Ingestion complete: " "articles=%d, entities=%d, sentences=%d",
+            ingestion_result.get("inserted_articles", 0),
+            ingestion_result.get("inserted_entities", 0),
+            ingestion_result.get("inserted_sentences", 0),
+        )
+
+        if total_inserted == 0:
+            logger.warning("No documents were inserted; skipping cleaning pipeline")
             return True
 
         # Run cleaning pipeline on newly ingested articles

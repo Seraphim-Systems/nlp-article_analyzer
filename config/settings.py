@@ -159,10 +159,10 @@ class Settings:
         default_factory=lambda: _env("KAGGLE_DATASET", "julianschelb/newsdata")
     )
 
-    #: Kaggle API username (set via .env)
+    #: Kaggle API username (optional, legacy format only; modern tokens don't need username)
     KAGGLE_USERNAME: str = field(default_factory=lambda: _env("KAGGLE_USERNAME", ""))
 
-    #: Kaggle API key (set via .env)
+    #: Kaggle API key/token (set via .env). Modern tokens include the full token here.
     KAGGLE_KEY: str = field(default_factory=lambda: _env("KAGGLE_KEY", ""))
 
     #: Local path to store Kaggle dataset downloads
