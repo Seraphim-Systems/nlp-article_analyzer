@@ -58,6 +58,19 @@ def rank_article(article: dict[str, Any]) -> int:
     return 0
 
 
+def rank_article_with_reasons(article: dict[str, Any]) -> tuple[int, list[str]]:
+    """Return rank and a human-readable list of missing-field reasons."""
+    missing_crucial = [f for f in CRUCIAL_FIELDS if _is_empty(article.get(f))]
+    if missing_crucial:
+        return 2, [f"missing_crucial:{field}" for field in missing_crucial]
+
+    missing_non_crucial = [f for f in NON_CRUCIAL_FIELDS if _is_empty(article.get(f))]
+    if missing_non_crucial:
+        return 1, [f"missing_optional:{field}" for field in missing_non_crucial]
+
+    return 0, []
+
+
 def rank_articles(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Return the same list with a `rank` key added/updated on each article.

@@ -33,7 +33,9 @@ services:
     environment:
       MONGO_INITDB_DATABASE: admin
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test:
+        - CMD-SHELL
+        - "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' || exit 1"
       interval: 5s
       timeout: 5s
       retries: 5
@@ -66,10 +68,10 @@ services:
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
       SKIP_BOOTSTRAP: "false"
-    # Entrypoint handles init + bootstrap, then waits for manual job execution
-    # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
-    # Or schedule via cron using orchestrate_jobs.sh
-    command: wait
+      RUN_CLEAN_AFTER_SCRAPE: "true"
+      ENGLISH_ONLY: "true"
+    # Entrypoint handles init + bootstrap, CMD specifies which job to run
+    command: job scrape
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts

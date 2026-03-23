@@ -36,7 +36,7 @@ def _collect_all_scrapers():
     return scrapers
 
 
-def run_scrape_job(for_date: date | None = None) -> None:
+def run_scrape_job(for_date: date | None = None, run_cleaning: bool | None = None) -> None:
     """
     Execute one full scrape cycle.
 
@@ -64,6 +64,13 @@ def run_scrape_job(for_date: date | None = None) -> None:
         len(all_articles),
         inserted,
     )
+
+    should_run_cleaning = settings.RUN_CLEAN_AFTER_SCRAPE if run_cleaning is None else run_cleaning
+    if should_run_cleaning:
+        from cleaning.cleaner import run_cleaning_pipeline
+
+        summary = run_cleaning_pipeline()
+        logger.info("=== Cleaning finished after scrape: %s ===", summary)
 
 
 def start_scheduler() -> None:

@@ -25,6 +25,13 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    val = os.environ.get(key)
+    if val is None:
+        return default
+    return str(val).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class Settings:
     # ------------------------------------------------------------------
@@ -74,6 +81,16 @@ class Settings:
     #: UTC hour at which the daily scrape job runs (0–23)
     SCRAPE_HOUR: int = field(
         default_factory=lambda: _env_int("SCRAPE_HOUR", 0)  # midnight
+    )
+
+    #: If true, run cleaning automatically right after each scrape cycle.
+    RUN_CLEAN_AFTER_SCRAPE: bool = field(
+        default_factory=lambda: _env_bool("RUN_CLEAN_AFTER_SCRAPE", True)
+    )
+
+    #: If true, skip articles whose detected language is not English.
+    ENGLISH_ONLY: bool = field(
+        default_factory=lambda: _env_bool("ENGLISH_ONLY", True)
     )
 
     # ------------------------------------------------------------------
