@@ -60,28 +60,62 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
         from tqdm import tqdm
 
         BATCH = 64
+        FLUSH_EVERY = BATCH * 4  # flush to DB every 256 articles
         enriched: list[dict[str, Any]] = []
         total_written = 0
+        total_entities = 0
+        batch_count = (len(articles) + BATCH - 1) // BATCH
 
-        for i in tqdm(range(0, len(articles), BATCH), desc="  NER", unit="batch", ncols=80):
+        logger.info("Starting NER on %d articles | batch_size=%d | total_batches=%d",
+                    len(articles), BATCH, batch_count)
+
+        pbar = tqdm(
+            range(0, len(articles), BATCH),
+            desc="  NER extraction",
+            unit="batch",
+            total=batch_count,
+            ncols=90,
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} batches [{elapsed}<{remaining}, {rate_fmt}]",
+        )
+
+        for i in pbar:
             chunk = articles[i : i + BATCH]
             enriched_chunk = batch_extract(chunk)
             enriched.extend(enriched_chunk)
 
-            if not dry_run and len(enriched) >= BATCH * 4:
-                total_written += insert_ner_articles(enriched)
+            batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
+            total_entities += batch_entities
+            articles_done = min(i + BATCH, len(articles))
+            pbar.set_postfix(
+                articles=articles_done,
+                entities=total_entities,
+                written=total_written,
+            )
+
+            if not dry_run and len(enriched) >= FLUSH_EVERY:
+                flushed = insert_ner_articles(enriched)
+                total_written += flushed
+                logger.info(
+                    "  [OK] Flushed %d articles to DB | total_written=%d | entities_so_far=%d",
+                    flushed, total_written, total_entities,
+                )
                 enriched = []
 
         if not dry_run:
             if enriched:
-                total_written += insert_ner_articles(enriched)
+                flushed = insert_ner_articles(enriched)
+                total_written += flushed
             result["classified_count"] = total_written
-            logger.info("Wrote %d NER articles to ner_articles", total_written)
+            logger.info(
+                "NER complete | articles=%d | entities=%d | written=%d",
+                len(articles), total_entities, total_written,
+            )
         else:
             result["classified_count"] = len(articles)
-            logger.info("DRY RUN: would write %d articles to ner_articles", len(articles))
-
-        logger.info("NER extraction complete: %d articles enriched", len(articles))
+            logger.info(
+                "DRY RUN: would write %d articles | entities_found=%d",
+                len(articles), total_entities,
+            )
 
     except Exception as e:
         logger.exception("Classify job failed")
