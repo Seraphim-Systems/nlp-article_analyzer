@@ -126,11 +126,12 @@ Scripts use `mongodump` / `mongorestore` against the running container.
 # Dump all databases to ~/Downloads/ (prints the filename on completion)
 bash scripts/db_dump.sh
 
-# Restore from a specific archive
+# Restore from a specific archive, then start the full stack
 bash scripts/db_restore.sh ~/Downloads/nlp_mongo_dump_YYYYMMDD_HHMMSS.tar.gz
+docker compose up -d
 ```
 
-`db_dump.sh` runs `mongodump` against the running container and compresses the output to a dated `.tar.gz` in `~/Downloads/` (or a custom path passed as the first argument). `db_restore.sh` takes the archive path, extracts it, and runs `mongorestore --drop` inside the container — existing data is overwritten.
+`db_dump.sh` runs `mongodump` against the running container and compresses the output to a dated `.tar.gz` in `~/Downloads/` (or a custom path passed as the first argument). `db_restore.sh` takes the archive path, extracts it, and runs `mongorestore --drop` inside the container — existing data is overwritten. Run `docker compose up -d` after restore to bring up the API and frontend.
 
 ---
 
