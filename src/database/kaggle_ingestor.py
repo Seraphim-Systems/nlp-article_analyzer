@@ -162,83 +162,80 @@ def _parse_kaggle_files(dataset_path: str) -> list[dict[str, Any]]:
     """
     Parse downloaded Kaggle dataset files.
 
-    The newsdata dataset typically includes CSV files with article data.
-    Returns list of article dicts compatible with MongoDB schema.
+    The julianschelb/newsdata dataset ships as JSON files whose schema
+    matches our article model directly (url, title, feed, body, etc.).
+    Only relevant_articles.json is ingested — the other files contain
+    sentence-level and entity data not needed here.
     """
-    import csv
+    import json
 
     articles: list[dict[str, Any]] = []
     dataset_dir = Path(dataset_path)
 
-    # Find CSV files
-    csv_files = list(dataset_dir.glob("*.csv"))
-    logger.info("Found %d CSV files to parse", len(csv_files))
+    # Use relevant_articles.json as the primary source; fall back to any JSON
+    target = dataset_dir / "relevant_articles.json"
+    json_files = [target] if target.exists() else list(dataset_dir.glob("*.json"))
+    logger.info("Found %d JSON file(s) to parse", len(json_files))
 
-    for csv_file in csv_files:
-        logger.info("Parsing %s", csv_file.name)
-
+    for json_file in json_files:
+        if json_file.stem not in ("relevant_articles",):
+            continue
+        logger.info("Parsing %s", json_file.name)
         try:
-            with open(csv_file, encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                if not reader.fieldnames:
-                    logger.warning("Empty CSV file: %s", csv_file.name)
-                    continue
-
-                for row in reader:
-                    article = _parse_kaggle_row(row)
-                    if article:
-                        articles.append(article)
-
+            with open(json_file, encoding="utf-8") as f:
+                rows = json.load(f)
+            for row in rows:
+                article = _parse_kaggle_row(row)
+                if article:
+                    articles.append(article)
         except Exception as e:
-            logger.warning("Failed to parse %s: %s", csv_file.name, e)
+            logger.warning("Failed to parse %s: %s", json_file.name, e)
 
     logger.info("Parsed total %d articles from all files", len(articles))
     return articles
 
 
-def _parse_kaggle_row(row: dict[str, str]) -> dict[str, Any] | None:
+def _parse_kaggle_row(row: dict[str, Any]) -> dict[str, Any] | None:
     """
-    Convert a Kaggle CSV row to article dict.
+    Convert a julianschelb/newsdata JSON record to our article schema.
 
-    Kaggle newsdata typically has columns:
-    - title, description, content, url, urlToImage, publishedAt, source
+    The dataset schema already matches our model:
+    _id, url, title, feed, type, pub, ret, lang, refs, sum, body, text
+    Dates are stored as {"$date": "..."} MongoDB extended JSON objects.
     """
     try:
-        # Required fields
-        url = row.get("url", "").strip()
-        title = row.get("title", "").strip()
-        body = row.get("content", "").strip() or row.get("description", "").strip()
+        url = (row.get("url") or "").strip()
+        title = (row.get("title") or "").strip()
+        body = (row.get("body") or "").strip()
 
         if not url or not title or not body:
             return None
 
-        # Publication date
-        pub_date = row.get("publishedAt", "").strip()
-        if pub_date:
+        def _extract_date(val: Any) -> str | None:
+            if not val:
+                return None
+            if isinstance(val, dict):
+                val = val.get("$date", "")
             try:
-                # Parse ISO-8601 date
-                pub_date = datetime.fromisoformat(
-                    pub_date.replace("Z", "+00:00")
+                return datetime.fromisoformat(
+                    str(val).replace("Z", "+00:00")
                 ).isoformat()
             except (ValueError, AttributeError):
-                pub_date = None
-
-        # Retrieval date (now)
-        ret_date = datetime.now(timezone.utc).isoformat()
+                return None
 
         return {
             "url": url,
             "title": title,
-            "feed": row.get("source", "Kaggle Dataset").strip(),
-            "type": "news",
-            "pub": pub_date,
-            "ret": ret_date,
-            "lang": "en",  # Assume English from Kaggle dataset
+            "feed": (row.get("feed") or "Kaggle Dataset").strip(),
+            "type": row.get("type"),
+            "pub": _extract_date(row.get("pub")),
+            "ret": _extract_date(row.get("ret")) or datetime.now(timezone.utc).isoformat(),
+            "lang": row.get("lang") or "en",
             "body": body,
-            "text": row.get("description", "").strip(),
-            "refs": [],
-            "sum": row.get("description", "").strip(),
-            "rank": None,  # Will be ranked by cleaning pipeline
+            "text": (row.get("text") or "").strip(),
+            "refs": row.get("refs") or [],
+            "sum": (row.get("sum") or "").strip(),
+            "rank": None,
         }
 
     except (KeyError, AttributeError, TypeError):

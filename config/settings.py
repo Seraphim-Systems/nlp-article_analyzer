@@ -168,6 +168,11 @@ class Settings:
         default_factory=lambda: _env("SKIP_BOOTSTRAP", "false").lower() == "true"
     )
 
+    #: Skip Rank-1 URL re-fetch during cleaning (useful for historical datasets with dead links)
+    SKIP_RANK1_RECOVERY: bool = field(
+        default_factory=lambda: _env("SKIP_RANK1_RECOVERY", "false").lower() == "true"
+    )
+
 
 # Singleton instance used throughout the project
 settings = Settings()

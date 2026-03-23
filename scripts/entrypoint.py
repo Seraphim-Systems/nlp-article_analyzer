@@ -153,7 +153,7 @@ def bootstrap_from_kaggle() -> bool:
 
         # Run cleaning pipeline on newly ingested articles
         logger.info("Running cleaning pipeline on ingested articles...")
-        clean_result = run_cleaning_pipeline()
+        clean_result = run_cleaning_pipeline(skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY)
         logger.info("Cleaning complete: %s", clean_result)
 
         return True

@@ -5,6 +5,7 @@ WORKDIR /app
 # Install system dependencies required by newspaper3k / lxml
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2-dev libxslt1-dev libjpeg-dev zlib1g-dev \
+    build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

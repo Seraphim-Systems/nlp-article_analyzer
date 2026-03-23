@@ -32,7 +32,7 @@ def _fetch_article_data(url: str, lang: str = "en") -> dict[str, Any]:
         art.parse()
         art.nlp()
     except Exception:
-        logger.exception("Re-fetch failed for %s", url)
+        logger.debug("Re-fetch failed for %s", url, exc_info=True)
         return {}
 
     pub_str = None
@@ -69,7 +69,7 @@ def fill_missing_fields(article: dict[str, Any]) -> dict[str, Any]:
     if not missing:
         return article  # Nothing to fix
 
-    logger.info("Re-fetching %s to fill: %s", url, missing)
+    logger.debug("Re-fetching %s to fill: %s", url, missing)
     fetched = _fetch_article_data(url, lang=article.get("lang") or "en")
     if not fetched:
         return article

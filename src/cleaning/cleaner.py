@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from tqdm import tqdm
+
 from database.repositories import (
     count_raw_articles_by_rank,
     delete_raw_by_rank,
@@ -45,7 +47,7 @@ def _rank_unranked_articles() -> None:
         return
 
     logger.info("Ranking %d unranked articles…", len(unranked))
-    for article in unranked:
+    for article in tqdm(unranked, desc="Ranking", unit="art"):
         rank = rank_article(article)
         update_raw_rank(article["url"], rank)
 
@@ -65,7 +67,7 @@ def _process_rank1() -> None:
     logger.info("Attempting to recover %d Rank-1 articles…", len(rank1_articles))
     promoted = 0
 
-    for article in rank1_articles:
+    for article in tqdm(rank1_articles, desc="Recovering rank-1", unit="art"):
         patched = fill_missing_fields(article)
         new_rank = rank_article(patched)
 
@@ -107,9 +109,15 @@ def _discard_rank2() -> int:
     return deleted
 
 
-def run_cleaning_pipeline() -> dict[str, int]:
+def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
     """
     Execute the full cleaning pipeline.
+
+    Parameters
+    ----------
+    skip_rank1_recovery : bool
+        If True, skip the URL re-fetch step for Rank-1 articles.
+        Useful for large historical datasets where most URLs are dead.
 
     Returns a summary dict:
     {
@@ -123,8 +131,11 @@ def run_cleaning_pipeline() -> dict[str, int]:
     # Step 1: rank new articles
     _rank_unranked_articles()
 
-    # Step 2: try to recover rank-1
-    _process_rank1()
+    # Step 2: try to recover rank-1 (skippable)
+    if skip_rank1_recovery:
+        logger.info("Skipping Rank-1 URL recovery (skip_rank1_recovery=True)")
+    else:
+        _process_rank1()
 
     # Step 3: promote rank-0 to clean DB
     promoted = _promote_rank0_to_clean()

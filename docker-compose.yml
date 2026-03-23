@@ -69,7 +69,10 @@ services:
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+      KAGGLE_KEY: ${KAGGLE_KEY}
       SKIP_BOOTSTRAP: "false"
+      SKIP_RANK1_RECOVERY: "true"
     # Entrypoint handles init + bootstrap, then waits for manual job execution
     # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
     # Or schedule via cron using orchestrate_jobs.sh
