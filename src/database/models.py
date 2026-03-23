@@ -68,6 +68,53 @@ ARTICLE_VALIDATOR: dict[str, Any] = {
                 "bsonType": ["string", "null"],
                 "description": "Full raw page text",
             },
+            "clean_text": {
+                "bsonType": ["string", "null"],
+                "description": "Normalized article body text",
+            },
+            "preprocessed_text": {
+                "bsonType": ["string", "null"],
+                "description": "NLP-cleaned body text (lemmatized, no stopwords)",
+            },
+            "money_tags": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+            },
+            "percent_tags": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+            },
+            "datetime_tags": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+            },
+            "url_tags": {
+                "bsonType": ["array", "null"],
+                "items": {
+                    "bsonType": "object",
+                    "properties": {
+                        "url": {"bsonType": "string"},
+                        "domain": {"bsonType": "string"},
+                        "tld": {"bsonType": "string"},
+                        "path": {"bsonType": "string"},
+                    },
+                },
+            },
+            "doc_stats": {
+                "bsonType": ["object", "null"],
+                "properties": {
+                    "char_count": {"bsonType": "int"},
+                    "token_count": {"bsonType": "int"},
+                    "sentence_count": {"bsonType": "int"},
+                    "paragraph_count": {"bsonType": "int"},
+                },
+            },
+            "cleaning_flags": {
+                "bsonType": ["object", "null"],
+            },
+            "signal_counts": {
+                "bsonType": ["object", "null"],
+            },
             "rank": {
                 "bsonType": ["int", "null"],
                 "enum": [0, 1, 2, None],
@@ -144,6 +191,15 @@ def build_article_dict(
         "body": body,
         "text": text,
         "rank": rank,
+        "clean_text": clean_text,
+        "preprocessed_text": preprocessed_text,
+        "money_tags": money_tags,
+        "percent_tags": percent_tags,
+        "datetime_tags": datetime_tags,
+        "url_tags": url_tags,
+        "doc_stats": doc_stats,
+        "cleaning_flags": cleaning_flags,
+        "signal_counts": signal_counts,
     }
 
 

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from preprocessing.text_processor import preprocess_text
+
 _MONEY_RE = re.compile(
     r"(?:[$EURGBPJPYCHF]|USD|EUR|GBP|JPY|CHF)\s?\d{1,3}(?:[,\.]\d{3})*(?:\.\d+)?",
     flags=re.IGNORECASE,
@@ -77,6 +79,7 @@ def enrich_article_for_cleaning(article: dict[str, Any]) -> dict[str, Any]:
     """Return article enriched with normalized text and extracted signal tags."""
     body = article.get("body") or article.get("text") or ""
     clean_text = normalize_text(body)
+    preprocessed_text = preprocess_text(clean_text)
 
     urls = [article.get("url")] if article.get("url") else []
     refs = article.get("refs") or []
@@ -101,6 +104,7 @@ def enrich_article_for_cleaning(article: dict[str, Any]) -> dict[str, Any]:
     enriched.update(
         {
             "clean_text": clean_text,
+            "preprocessed_text": preprocessed_text,
             "money_tags": money_tags,
             "percent_tags": percent_tags,
             "datetime_tags": datetime_tags,

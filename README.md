@@ -8,6 +8,7 @@ An end-to-end NLP pipeline for scraping, cleaning, classifying, and evaluating n
 
 - **Scraping** — Collect articles from RSS feeds with newspaper3k
 - **Cleaning** — Quality filtering and ranking (0=complete, 1=incomplete, 2=discard)
+- **Preprocessing** — NLP normalization (lowercasing, tokenization, lemmatization, stopword removal) using SpaCy
 - **Classification** (Phase 3) — NLP categorization, entity extraction, sentiment analysis
 - **Evaluation** (Phase 4) — Model performance metrics and baselines
 - **REST API** (Phase 5) — Full query and job management interface
