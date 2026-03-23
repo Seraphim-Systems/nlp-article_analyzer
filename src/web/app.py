@@ -2,32 +2,45 @@
 FastAPI web service for NLP article analyzer.
 
 Provides REST endpoints for:
+- Stack health and collection statistics
 - Job management (trigger, status)
-- Article queries
-- Model metrics
-- Health checks
-
-This is expanded in Phase 5 with full implementations.
+- Article queries (clean + NER)
+- TF-IDF comparison (clean text vs NER-enhanced text)
 """
 
 from __future__ import annotations
 
+import base64
 import logging
+import threading
+import uuid
+from collections import defaultdict
 from datetime import datetime
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────
-# Pydantic response models
+# In-memory job tracking (sufficient for single-instance dev)
+# ──────────────────────────────────────────────────────────────
+
+_jobs: dict[str, dict[str, Any]] = {}
+
+
+# ──────────────────────────────────────────────────────────────
+# Pydantic models
 # ──────────────────────────────────────────────────────────────
 
 
 class HealthResponse(BaseModel):
     status: str
     timestamp: str
+    mongodb: str
+    collections: dict[str, int]
 
 
 class JobTriggerRequest(BaseModel):
@@ -43,16 +56,17 @@ class JobTriggerResponse(BaseModel):
     message: str
 
 
-class ArticleResponse(BaseModel):
-    url: str
-    title: str
-    feed: str
-    rank: int | None = None
+class JobStatusResponse(BaseModel):
+    job_id: str
+    job_name: str
+    status: str
+    started_at: str
+    finished_at: str | None
+    result: dict | None
 
 
 class MetricsResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
-
     model_version: str | None = None
     last_updated: str | None = None
     precision: float | None = None
@@ -61,105 +75,347 @@ class MetricsResponse(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────
-# FastAPI app
+# App + CORS
 # ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="NLP Article Analyzer API",
-    description="REST API for article scraping, cleaning, classification, and evaluation",
-    version="0.1.0",
+    description="REST API for the NLP article pipeline — scrape, clean, NER, compare",
+    version="1.0.0",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://frontend:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ──────────────────────────────────────────────────────────────
+# Health + Stats
+# ──────────────────────────────────────────────────────────────
 
 
 @app.get("/", tags=["root"])
 def read_root() -> dict:
-    """Root endpoint."""
-    return {
-        "name": "NLP Article Analyzer API",
-        "version": "0.1.0",
-        "docs_url": "/docs",
-        "health_url": "/health",
-    }
+    return {"name": "NLP Article Analyzer API", "version": "1.0.0", "docs": "/docs"}
 
 
 @app.get("/health", tags=["health"], response_model=HealthResponse)
 async def health() -> HealthResponse:
-    """Health check endpoint."""
+    """Full stack health check — MongoDB ping + collection counts."""
+    from config.settings import settings
+    from database.connection import get_client
+
+    mongo_status = "healthy"
+    counts: dict[str, int] = {}
+    try:
+        client = get_client()
+        client.admin.command("ping")
+        counts = {
+            "raw":        client[settings.RAW_DB_NAME][settings.RAW_COLLECTION].count_documents({}),
+            "clean":      client[settings.CLEAN_DB_NAME][settings.CLEAN_COLLECTION].count_documents({}),
+            "ner":        client[settings.NER_DB_NAME][settings.NER_COLLECTION].count_documents({}),
+            "quarantine": client[settings.RAW_DB_NAME].get_collection("quarantine").count_documents({}),
+        }
+    except Exception as e:
+        mongo_status = f"unhealthy: {e}"
+
     return HealthResponse(
-        status="healthy",
+        status="healthy" if mongo_status == "healthy" else "degraded",
         timestamp=datetime.utcnow().isoformat() + "Z",
+        mongodb=mongo_status,
+        collections=counts,
     )
+
+
+@app.get("/stats", tags=["stats"])
+async def get_stats() -> dict:
+    """Collection document counts — lightweight version of /health."""
+    from config.settings import settings
+    from database.connection import get_client
+
+    client = get_client()
+
+    raw_by_rank = {}
+    try:
+        pipeline = [{"$group": {"_id": "$rank", "count": {"$sum": 1}}}]
+        for doc in client[settings.RAW_DB_NAME][settings.RAW_COLLECTION].aggregate(pipeline):
+            raw_by_rank[str(doc["_id"])] = doc["count"]
+    except Exception:
+        pass
+
+    return {
+        "raw":        client[settings.RAW_DB_NAME][settings.RAW_COLLECTION].count_documents({}),
+        "clean":      client[settings.CLEAN_DB_NAME][settings.CLEAN_COLLECTION].count_documents({}),
+        "ner":        client[settings.NER_DB_NAME][settings.NER_COLLECTION].count_documents({}),
+        "quarantine": client[settings.RAW_DB_NAME].get_collection("quarantine").count_documents({}),
+        "raw_by_rank": raw_by_rank,
+        "jobs_tracked": len(_jobs),
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# Jobs
+# ──────────────────────────────────────────────────────────────
+
+
+def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
+    """Execute a job in a background thread and record result."""
+    _jobs[job_id]["status"] = "running"
+    try:
+        from jobs import run_job
+        result = run_job(job_name, dry_run=dry_run)
+        _jobs[job_id]["status"] = "success" if result.get("status") == "success" else "failed"
+        _jobs[job_id]["result"] = result
+    except Exception as e:
+        _jobs[job_id]["status"] = "failed"
+        _jobs[job_id]["result"] = {"error": str(e)}
+    finally:
+        _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
 
 
 @app.post("/jobs/trigger", tags=["jobs"], response_model=JobTriggerResponse)
 async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
-    """
-    Trigger a job (scrape, clean, classify, or evaluate).
+    """Trigger a pipeline job asynchronously."""
+    valid = {"scrape", "clean", "classify", "ner", "evaluate"}
+    if request.job_name not in valid:
+        raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
-    Currently synchronous; returns result immediately.
+    job_id = str(uuid.uuid4())[:8]
+    _jobs[job_id] = {
+        "job_id":      job_id,
+        "job_name":    request.job_name,
+        "status":      "queued",
+        "started_at":  datetime.utcnow().isoformat() + "Z",
+        "finished_at": None,
+        "result":      None,
+    }
 
-    Query parameters:
-    - job_name: One of scrape, clean, classify, evaluate
-    - date: (optional) ISO date for scrape/classify (YYYY-MM-DD)
-    - dry_run: (optional) Boolean to preview changes without persisting
-
-    Phase 5: To be implemented with full job orchestration.
-    """
-    return JobTriggerResponse(
-        job_id="stub-001",
-        job_name=request.job_name,
-        status="not_implemented",
-        message="Job triggering will be implemented in Phase 5",
+    t = threading.Thread(
+        target=_run_job_thread,
+        args=(job_id, request.job_name, request.dry_run),
+        daemon=True,
     )
+    t.start()
+
+    return JobTriggerResponse(
+        job_id=job_id,
+        job_name=request.job_name,
+        status="queued",
+        message=f"Job {request.job_name} queued with id={job_id}",
+    )
+
+
+@app.get("/jobs/{job_id}", tags=["jobs"], response_model=JobStatusResponse)
+async def get_job_status(job_id: str) -> JobStatusResponse:
+    """Poll job status by ID."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return JobStatusResponse(**job)
+
+
+@app.get("/jobs", tags=["jobs"])
+async def list_jobs() -> dict:
+    """List all tracked jobs (most recent first)."""
+    jobs = sorted(_jobs.values(), key=lambda j: j["started_at"], reverse=True)
+    return {"jobs": jobs[:50]}
+
+
+# ──────────────────────────────────────────────────────────────
+# Articles
+# ──────────────────────────────────────────────────────────────
 
 
 @app.get("/articles", tags=["articles"])
 async def list_articles(
-    skip: int = 0, limit: int = 20, rank: int | None = None
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    collection: str = Query("clean", pattern="^(clean|ner)$"),
+    search: str | None = None,
+) -> dict:
+    """Paginated article list from clean or ner collection."""
+    from database.repositories import get_clean_collection, get_ner_collection
+
+    col = get_ner_collection() if collection == "ner" else get_clean_collection()
+
+    query: dict = {}
+    if search:
+        query["$or"] = [
+            {"title": {"$regex": search, "$options": "i"}},
+            {"feed": {"$regex": search, "$options": "i"}},
+        ]
+
+    total = col.count_documents(query)
+    projection = {"url": 1, "title": 1, "feed": 1, "pub": 1, "lang": 1,
+                  "doc_stats": 1, "cleaning_flags": 1, "signal_counts": 1}
+    if collection == "ner":
+        projection["entities"] = 1
+
+    items = list(col.find(query, projection).sort("pub", -1).skip(skip).limit(limit))
+    for item in items:
+        item.pop("_id", None)
+        if "entities" in item:
+            item["entity_count"] = len(item["entities"])
+            item.pop("entities", None)
+
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
+
+
+@app.get("/articles/ner/{url_b64}", tags=["articles"])
+async def get_ner_article(url_b64: str) -> dict:
+    """Get NER-enriched article by base64-encoded URL."""
+    try:
+        url = base64.b64decode(url_b64 + "==").decode("utf-8")
+    except Exception:
+        raise HTTPException(400, "Invalid base64 URL encoding")
+
+    from database.repositories import get_clean_collection, get_ner_collection
+
+    clean = get_clean_collection().find_one({"url": url}, {"_id": 0})
+    if not clean:
+        raise HTTPException(404, "Article not found in clean collection")
+
+    ner = get_ner_collection().find_one({"url": url}, {"_id": 0})
+
+    return {"clean": clean, "ner": ner}
+
+
+# ──────────────────────────────────────────────────────────────
+# TF-IDF Comparison (thesis core feature)
+# ──────────────────────────────────────────────────────────────
+
+
+@app.get("/compare/tfidf", tags=["compare"])
+async def tfidf_comparison(
+    sample_size: int = Query(200, ge=10, le=1000),
 ) -> dict:
     """
-    List articles from the clean collection.
+    Compute TF-IDF comparison: clean preprocessed text vs NER-enhanced text.
 
-    Query parameters:
-    - skip: Pagination offset (default: 0)
-    - limit: Results per page (default: 20)
-    - rank: Filter by rank (0=clean, 1=incomplete)
+    NER-enhanced text replaces entity spans with TYPE_word tokens
+    (e.g. "New York" → "LOC_New_York"), making entity mentions single
+    discriminative features for TF-IDF.
 
-    Phase 5: To be implemented with MongoDB queries.
+    Returns top-25 terms and scores for both versions, plus entity distribution.
     """
+    import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    from database.repositories import get_ner_collection
+
+    articles = list(
+        get_ner_collection().find(
+            {
+                "preprocessed_text": {"$exists": True, "$ne": ""},
+                "entities": {"$exists": True},
+            },
+            {"preprocessed_text": 1, "body": 1, "entities": 1, "url": 1, "title": 1},
+        ).limit(sample_size)
+    )
+
+    if not articles:
+        raise HTTPException(
+            503,
+            "No NER-enriched articles available yet. Run the NER job first.",
+        )
+
+    clean_texts: list[str] = []
+    ner_texts: list[str] = []
+    entity_dist: dict[str, int] = defaultdict(int)
+
+    for a in articles:
+        clean_texts.append(a.get("preprocessed_text") or "")
+
+        body = a.get("body") or ""
+        entities = sorted(
+            a.get("entities", []),
+            key=lambda e: e.get("start", 0),
+            reverse=True,  # process from end to preserve offsets
+        )
+        ner_body = body
+        for ent in entities:
+            label = ent.get("label", "MISC")
+            text  = ent.get("text", "").replace(" ", "_")
+            s, e  = ent.get("start", 0), ent.get("end", 0)
+            if 0 <= s < e <= len(ner_body):
+                ner_body = ner_body[:s] + f"{label}_{text}" + ner_body[e:]
+            entity_dist[label] += 1
+
+        ner_texts.append(ner_body.lower())
+
+    # Fit TF-IDF vectorizers
+    top_n = 25
+    vect_clean = TfidfVectorizer(max_features=300, ngram_range=(1, 2), min_df=3, sublinear_tf=True)
+    vect_ner   = TfidfVectorizer(max_features=300, ngram_range=(1, 2), min_df=3, sublinear_tf=True)
+
+    try:
+        mat_clean = vect_clean.fit_transform(clean_texts)
+        mat_ner   = vect_ner.fit_transform(ner_texts)
+    except ValueError as e:
+        raise HTTPException(500, f"TF-IDF computation failed: {e}")
+
+    mean_clean = np.asarray(mat_clean.mean(axis=0)).flatten()
+    mean_ner   = np.asarray(mat_ner.mean(axis=0)).flatten()
+
+    terms_clean = vect_clean.get_feature_names_out()
+    terms_ner   = vect_ner.get_feature_names_out()
+
+    top_clean_idx = mean_clean.argsort()[-top_n:][::-1]
+    top_ner_idx   = mean_ner.argsort()[-top_n:][::-1]
+
+    # Identify NER-specific terms (contain underscore type prefix)
+    ner_labels = {"PER_", "ORG_", "LOC_", "MISC_"}
+
+    def is_ner_term(t: str) -> bool:
+        return any(t.startswith(p) for p in ner_labels)
+
     return {
-        "items": [],
-        "skip": skip,
-        "limit": limit,
-        "total": 0,
-        "message": "Article querying will be implemented in Phase 5",
+        "sample_size":    len(articles),
+        "clean_top_terms": [
+            {"term": terms_clean[i], "score": float(mean_clean[i]), "is_ner": False}
+            for i in top_clean_idx
+        ],
+        "ner_top_terms": [
+            {"term": terms_ner[i], "score": float(mean_ner[i]), "is_ner": is_ner_term(terms_ner[i])}
+            for i in top_ner_idx
+        ],
+        "entity_distribution":  dict(entity_dist),
+        "clean_vocab_size": int(mat_clean.shape[1]),
+        "ner_vocab_size":   int(mat_ner.shape[1]),
+        "ner_token_ratio":  round(
+            sum(1 for t in terms_ner if is_ner_term(t)) / max(len(terms_ner), 1), 3
+        ),
     }
+
+
+# ──────────────────────────────────────────────────────────────
+# Metrics (stub — Phase 5)
+# ──────────────────────────────────────────────────────────────
 
 
 @app.get("/metrics", tags=["metrics"], response_model=MetricsResponse)
 async def get_metrics() -> MetricsResponse:
-    """
-    Get current model performance metrics.
+    return MetricsResponse()
 
-    Returns the latest model run results including precision, recall, F1.
 
-    Phase 5: To be implemented with metrics retrieval from DB.
-    """
-    return MetricsResponse(
-        model_version=None,
-        last_updated=None,
-        precision=None,
-        recall=None,
-        f1=None,
-    )
+# ──────────────────────────────────────────────────────────────
+# Startup
+# ──────────────────────────────────────────────────────────────
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Initialize databases on application startup."""
     try:
         from database.init_db import init_databases
-
         init_databases()
         logger.info("Databases initialized on startup")
     except Exception as e:

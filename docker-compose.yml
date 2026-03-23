@@ -138,6 +138,23 @@ services:
     networks:
       - nlp_network
 
+  # ── React/Vite frontend ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nlp_frontend_dev
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+    networks:
+      - nlp_network
+
 networks:
   nlp_network:
     driver: bridge
