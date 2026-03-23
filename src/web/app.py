@@ -18,8 +18,12 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from config.settings import settings
@@ -105,6 +109,31 @@ class MetricsResponse(BaseModel):
 
 
 # ──────────────────────────────────────────────────────────────
+# Lifespan
+# ──────────────────────────────────────────────────────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    try:
+        from database.init_db import init_databases
+        init_databases()
+        logger.info("Databases initialized on startup")
+    except Exception as e:
+        logger.error("Failed to initialize databases on startup: %s", e)
+        raise
+    yield
+    # Shutdown
+    try:
+        from database.connection import close_connection
+        close_connection()
+        logger.info("MongoDB connection closed on shutdown")
+    except Exception:
+        pass
+
+
+# ──────────────────────────────────────────────────────────────
 # App + CORS
 # ──────────────────────────────────────────────────────────────
 
@@ -112,6 +141,7 @@ app = FastAPI(
     title="NLP Article Analyzer API",
     description="REST API for the NLP article pipeline — scrape, clean, NER, compare",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -127,6 +157,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": str(exc.body)},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    logger.exception("Unhandled exception on %s %s", request.method, request.url)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -438,16 +485,3 @@ async def get_metrics() -> MetricsResponse:
     return MetricsResponse()
 
 
-# ──────────────────────────────────────────────────────────────
-# Startup
-# ──────────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    try:
-        from database.init_db import init_databases
-        init_databases()
-        logger.info("Databases initialized on startup")
-    except Exception as e:
-        logger.error("Failed to initialize databases: %s", e)
-        raise
