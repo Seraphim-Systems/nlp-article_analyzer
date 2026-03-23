@@ -13,7 +13,7 @@ End-to-end NLP pipeline that scrapes news articles from RSS feeds, cleans them, 
 | NER | `ner` | Runs `dslim/bert-base-NER` over clean articles; stores entity spans in `nlp_ner` |
 | Evaluate | `evaluate` | Computes model metrics against stored runs |
 
-**Stack:** Python 3.11 · FastAPI · React/Vite · MongoDB 7 · Docker Compose · HuggingFace Transformers
+**Stack:** Python 3.11 · FastAPI · React/Vite · MongoDB 7 · Docker Compose · HuggingFace Transformers · BERT NER (`dslim/bert-base-NER`)
 
 ---
 
@@ -97,15 +97,20 @@ docker compose exec jobs python scripts/run_job.py scrape --json     # JSON outp
 docker compose exec jobs python scripts/run_job.py clean --dry-run   # preview only
 ```
 
-### Native NER (without Docker)
+### Native NER (without Docker — uses MPS/CUDA/CPU)
+
+Run natively to leverage Apple Metal (MPS) or a local CUDA GPU — Docker cannot access these accelerators.
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-heavy.txt
 
+# Auto-detects: CUDA → Apple Metal (MPS) → CPU
 PYTHONPATH=src:. .venv/bin/python scripts/run_job.py ner
 ```
+
+MongoDB must be running (`docker compose up -d mongodb`) before the native process starts.
 
 ---
 
@@ -154,6 +159,9 @@ docker compose down
 
 # Stop and wipe volumes (full reset)
 docker compose down --volumes
+
+# Open MongoDB shell
+docker compose exec mongodb mongosh
 ```
 
 ### Project structure
