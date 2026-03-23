@@ -26,13 +26,17 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def get_client() -> MongoClient:
-    """Return a singleton MongoClient instance."""
+    """Return a singleton MongoClient with connection pooling."""
     logger.info("Connecting to MongoDB at %s", settings.MONGO_URI)
     client: MongoClient = MongoClient(
         settings.MONGO_URI,
+        maxPoolSize=10,
+        minPoolSize=1,
+        connectTimeoutMS=5_000,
         serverSelectionTimeoutMS=5_000,
+        socketTimeoutMS=30_000,
+        retryWrites=True,
     )
-    # Ping to surface connection errors early
     client.admin.command("ping")
     logger.info("MongoDB connection established.")
     return client
