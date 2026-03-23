@@ -35,7 +35,7 @@ def run(for_date: date | None = None) -> None:
     logger.info("Pipeline starting for date: %s", target)
 
     # Phase 1 — Collect
-    run_scrape_job(for_date=target)
+    run_scrape_job(for_date=target, run_cleaning=False)
 
     # Phase 2 — Clean
     summary = run_cleaning_pipeline()
