@@ -85,13 +85,6 @@ services:
     # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
     # Or schedule via cron using orchestrate_jobs.sh
     command: wait
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
