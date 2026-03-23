@@ -66,6 +66,15 @@ def get_clean_collection() -> Collection:
     )
 
 
+def get_quarantine_collection() -> Collection:
+    return _ensure_collection(
+        get_raw_db(),
+        f"{settings.RAW_COLLECTION}_quarantine",
+        ARTICLE_VALIDATOR,
+        RAW_INDEXES,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Raw-collection operations
 # ---------------------------------------------------------------------------
@@ -104,8 +113,11 @@ def get_raw_articles_by_rank(rank: int) -> Iterator[dict[str, Any]]:
     return get_raw_collection().find({"rank": rank})
 
 
-def update_raw_rank(url: str, rank: int) -> None:
-    get_raw_collection().update_one({"url": url}, {"$set": {"rank": rank}})
+def update_raw_rank(url: str, rank: int, reasons: list[str] | None = None) -> None:
+    payload: dict[str, Any] = {"rank": rank}
+    if reasons is not None:
+        payload["rank_reasons"] = reasons
+    get_raw_collection().update_one({"url": url}, {"$set": payload})
 
 
 def update_raw_article_fields(url: str, fields: dict[str, Any]) -> None:
@@ -118,6 +130,30 @@ def delete_raw_by_rank(rank: int) -> int:
     result = get_raw_collection().delete_many({"rank": rank})
     logger.info("Deleted %d raw articles with rank=%d.", result.deleted_count, rank)
     return result.deleted_count
+
+
+def upsert_quarantine_articles(articles: list[dict[str, Any]]) -> int:
+    """Store low-quality documents for audit/recovery instead of hard deleting."""
+    if not articles:
+        return 0
+
+    col = get_quarantine_collection()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    ops = []
+    for a in articles:
+        doc = dict(a)
+        doc["quarantined_at"] = now_iso
+        ops.append(UpdateOne({"url": doc["url"]}, {"$set": doc}, upsert=True))
+
+    try:
+        result = col.bulk_write(ops, ordered=False)
+        upserted = result.upserted_count + result.modified_count
+    except BulkWriteError as exc:
+        upserted = exc.details.get("nUpserted", 0)
+        logger.warning("Quarantine bulk write partial error: %s", exc.details)
+
+    logger.info("Quarantined %d raw articles.", upserted)
+    return upserted
 
 
 # ---------------------------------------------------------------------------
