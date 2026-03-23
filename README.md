@@ -13,7 +13,11 @@ End-to-end NLP pipeline that scrapes news articles from RSS feeds, cleans them, 
 | NER | `ner` | Runs `dslim/bert-base-NER` over clean articles; stores entity spans in `nlp_ner` |
 | Evaluate | `evaluate` | Computes model metrics against stored runs |
 
-**Stack:** Python 3.11 · FastAPI · React/Vite · MongoDB 7 · Docker Compose · HuggingFace Transformers · BERT NER (`dslim/bert-base-NER`)
+---
+
+## Stack
+
+Python 3.11 · FastAPI · React/Vite · MongoDB 7 · Docker Compose · HuggingFace Transformers · BERT NER (`dslim/bert-base-NER`)
 
 ---
 
