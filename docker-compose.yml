@@ -19,6 +19,8 @@
 volumes:
   mongo_data:
     driver: local
+  hf_cache:
+    driver: local
 
 services:
   # ── MongoDB database (containerized local instance) ─────────────────────
@@ -62,6 +64,8 @@ services:
       CLEAN_DB_NAME: nlp_clean
       CLASSIFIED_DB_NAME: nlp_classified
       MODELS_DB_NAME: nlp_models
+      NER_DB_NAME: nlp_ner
+      NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
@@ -74,6 +78,7 @@ services:
       - ./src:/app/src
       - ./scripts:/app/scripts
       - ./config:/app/config
+      - hf_cache:/root/.cache/huggingface
     logging:
       driver: "json-file"
       options:
@@ -100,6 +105,8 @@ services:
       CLEAN_DB_NAME: nlp_clean
       CLASSIFIED_DB_NAME: nlp_classified
       MODELS_DB_NAME: nlp_models
+      NER_DB_NAME: nlp_ner
+      NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
@@ -110,6 +117,7 @@ services:
       - ./src:/app/src
       - ./scripts:/app/scripts
       - ./config:/app/config
+      - hf_cache:/root/.cache/huggingface
     logging:
       driver: "json-file"
       options:

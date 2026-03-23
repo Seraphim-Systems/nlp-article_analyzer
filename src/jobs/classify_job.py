@@ -1,9 +1,7 @@
 """
-Classify job - tags cleaned articles with NLP classifications (category, entities, sentiment).
+Classify job — extracts named entities from clean articles and writes results to ner_articles.
 
 Entry point: run()
-
-NOTE: This is a stub for Phase 3 implementation.
 """
 
 from __future__ import annotations
@@ -18,31 +16,22 @@ logger = logging.getLogger(__name__)
 
 def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
     """
-    Execute the classification job.
+    Execute the NER classification job.
 
-    Fetches all Rank-0 (clean) articles and applies NLP models:
-    - Text classification (category/subcategory)
-    - Named entity recognition
-    - Sentiment analysis
-    - Keyword extraction
-
-    Upserts results into the classified collection.
+    Fetches all clean articles not yet in ner_articles, runs NER extraction
+    via dslim/bert-base-NER, and upserts enriched documents into ner_articles.
 
     Parameters
     ----------
     for_date : date, optional
-        Filter articles by publication date (optional).
+        Not used — kept for interface compatibility with other jobs.
     dry_run : bool
-        If True, analyze but don't update collections.
+        If True, run extraction but skip DB writes.
 
     Returns
     -------
     dict
-        Result with keys:
-        - status: 'success' or 'failed'
-        - classified_count: articles classified
-        - errors: list of error messages
-        - duration_seconds: execution time
+        Result with keys: status, classified_count, errors, duration_seconds
     """
     start_time = time.time()
     result: dict[str, Any] = {
@@ -53,20 +42,30 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
     }
 
     try:
-        # Initialize databases on first run
         from database.init_db import init_databases
+        from database.repositories import get_unprocessed_clean_articles, insert_ner_articles
+        from features.ner_extractor import batch_extract
 
         init_databases()
 
-        logger.info("=== Classify job started ===")
+        logger.info("=== Classify (NER) job started ===")
+
+        articles = get_unprocessed_clean_articles()
+        logger.info("Found %d unprocessed clean articles", len(articles))
+
+        if not articles:
+            logger.info("No unprocessed articles — nothing to do.")
+            return result
+
+        enriched = batch_extract(articles)
+        logger.info("NER extraction complete: %d articles enriched", len(enriched))
 
         if dry_run:
-            logger.info("DRY RUN: Classification would run")
+            logger.info("DRY RUN: would write %d articles to ner_articles", len(enriched))
         else:
-            logger.warning("Classify job not yet implemented (Phase 3)")
-            logger.info("Would classify articles here")
-
-        result["status"] = "success"
+            count = insert_ner_articles(enriched)
+            result["classified_count"] = count
+            logger.info("Wrote %d NER articles to ner_articles", count)
 
     except Exception as e:
         logger.exception("Classify job failed")

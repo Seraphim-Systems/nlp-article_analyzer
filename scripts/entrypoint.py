@@ -52,16 +52,16 @@ def wait_for_mongodb(max_retries: int = 30, retry_delay: int = 2) -> bool:
     for attempt in range(max_retries):
         try:
             logger.info(
-                "Connecting to MongoDB (attempt %d/%d)…", attempt + 1, max_retries
+                "Connecting to MongoDB (attempt %d/%d)...", attempt + 1, max_retries
             )
             client = get_client()
             client.admin.command("ping")
-            logger.info("✓ MongoDB connection established")
+            logger.info("MongoDB connection established")
             return True
         except Exception as e:
             if attempt < max_retries - 1:
                 logger.warning(
-                    "Connection failed: %s. Retrying in %ds…", e, retry_delay
+                    "Connection failed: %s. Retrying in %ds...", e, retry_delay
                 )
                 time.sleep(retry_delay)
             else:
@@ -87,6 +87,7 @@ def is_database_empty() -> bool:
         settings.CLEAN_DB_NAME,
         settings.CLASSIFIED_DB_NAME,
         settings.MODELS_DB_NAME,
+        settings.NER_DB_NAME,
     ]
 
     for db_name in dbs:
@@ -130,7 +131,7 @@ def bootstrap_from_kaggle() -> bool:
         logger.warning("  Set KAGGLE_USERNAME and KAGGLE_KEY in .env to enable")
         return True  # Not an error, just skip
 
-    logger.info("Starting Kaggle dataset bootstrap…")
+    logger.info("Starting Kaggle dataset bootstrap...")
 
     try:
         # Download and ingest dataset
@@ -141,7 +142,7 @@ def bootstrap_from_kaggle() -> bool:
             return False
 
         logger.info(
-            "✓ Ingestion complete: parsed=%d, inserted=%d",
+            "Ingestion complete: parsed=%d, inserted=%d",
             ingestion_result["parsed"],
             ingestion_result["inserted"],
         )
@@ -151,9 +152,9 @@ def bootstrap_from_kaggle() -> bool:
             return True
 
         # Run cleaning pipeline on newly ingested articles
-        logger.info("Running cleaning pipeline on ingested articles…")
+        logger.info("Running cleaning pipeline on ingested articles...")
         clean_result = run_cleaning_pipeline()
-        logger.info("✓ Cleaning complete: %s", clean_result)
+        logger.info("Cleaning complete: %s", clean_result)
 
         return True
 
@@ -171,9 +172,9 @@ def initialize_databases() -> bool:
     try:
         from database.init_db import init_databases
 
-        logger.info("Initializing databases…")
+        logger.info("Initializing databases...")
         init_databases()
-        logger.info("✓ Databases initialized")
+        logger.info("Databases initialized")
         return True
     except Exception as e:
         logger.exception("Database initialization failed")
@@ -190,30 +191,30 @@ def run_entrypoint_sequence() -> int:
     logger.info("Start time: %s", datetime.now().isoformat())
 
     # Step 1: Wait for MongoDB
-    logger.info("\n[1/4] Waiting for MongoDB…")
+    logger.info("\n[1/4] Waiting for MongoDB...")
     if not wait_for_mongodb():
-        logger.error("✗ MongoDB not available. Aborting.")
+        logger.error("MongoDB not available. Aborting.")
         return 1
 
     # Step 2: Initialize database schemas
-    logger.info("\n[2/4] Initializing databases…")
+    logger.info("\n[2/4] Initializing databases...")
     if not initialize_databases():
-        logger.error("✗ Database initialization failed. Aborting.")
+        logger.error("Database initialization failed. Aborting.")
         return 1
 
     # Step 3: Check if bootstrap needed
-    logger.info("\n[3/4] Checking if bootstrap required…")
+    logger.info("\n[3/4] Checking if bootstrap required...")
     if is_database_empty():
-        logger.info("Database empty. Attempting bootstrap…")
+        logger.info("Database empty. Attempting bootstrap...")
         if not bootstrap_from_kaggle():
-            logger.error("✗ Bootstrap failed. Aborting.")
+            logger.error("Bootstrap failed. Aborting.")
             return 1
     else:
         logger.info("Database already populated. Skipping bootstrap.")
 
     # Step 4: Ready to start service
-    logger.info("\n[4/4] Ready to start service…")
-    logger.info("✓ Initialization complete")
+    logger.info("\n[4/4] Ready to start service...")
+    logger.info("Initialization complete")
     logger.info("=== Startup sequence finished ===\n")
 
     return 0
@@ -278,7 +279,7 @@ def main() -> int:
             result = run_job(job_name)
             return 0 if result["status"] == "success" else 1
 
-        elif service_arg in ["scrape", "clean", "classify", "evaluate"]:
+        elif service_arg in ["scrape", "clean", "classify", "ner", "evaluate"]:
             # Run as job (backward compatible)
             from jobs import run_job
 
@@ -289,7 +290,7 @@ def main() -> int:
         else:
             logger.error("Unknown service: %s", service_arg)
             logger.error(
-                "Valid services: api, wait, job <job_name>, scrape, clean, classify, evaluate"
+                "Valid services: api, wait, job <job_name>, scrape, clean, classify, ner, evaluate"
             )
             return 1
 

@@ -56,7 +56,7 @@ def run_job(
         from jobs.clean_job import run as clean_run
 
         return clean_run(dry_run=dry_run)
-    elif job_name == "classify":
+    elif job_name in ("classify", "ner"):
         from jobs.classify_job import run as classify_run
 
         return classify_run(for_date=for_date, dry_run=dry_run)
@@ -67,7 +67,7 @@ def run_job(
     else:
         raise ValueError(
             f"Unknown job: {job_name}. "
-            f"Valid jobs: scrape, clean, classify, evaluate"
+            f"Valid jobs: scrape, clean, classify, ner, evaluate"
         )
 
 

@@ -1,12 +1,14 @@
 """
 MongoDB connection manager.
 
-Two separate MongoDB databases are maintained:
-  - RAW_DB   : stores articles exactly as scraped, never modified
-  - CLEAN_DB : stores articles that have passed the cleaning pipeline (rank 0 or 1)
+Five MongoDB databases are maintained:
+  - RAW_DB        : articles as scraped, never modified
+  - CLEAN_DB      : articles that passed the cleaning pipeline
+  - CLASSIFIED_DB : articles with classification labels (future)
+  - MODELS_DB     : model run metadata and metrics
+  - NER_DB        : articles enriched with named entities
 
-Both databases share the same MongoDB instance (or cluster) but are logically
-isolated so that the raw data is always preserved as a safety net.
+All databases share the same MongoDB instance but are logically isolated.
 """
 
 from __future__ import annotations
@@ -44,6 +46,11 @@ def get_raw_db() -> Database:
 def get_clean_db() -> Database:
     """Return the cleaned articles database."""
     return get_client()[settings.CLEAN_DB_NAME]
+
+
+def get_ner_db() -> Database:
+    """Return the NER-enriched articles database."""
+    return get_client()[settings.NER_DB_NAME]
 
 
 def close_connection() -> None:

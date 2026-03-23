@@ -67,6 +67,16 @@ class Settings:
         default_factory=lambda: _env("CLASSIFIED_COLLECTION", "articles")
     )
 
+    #: Name of the NER articles database
+    NER_DB_NAME: str = field(
+        default_factory=lambda: _env("NER_DB_NAME", "nlp_ner")
+    )
+
+    #: Collection name for NER-enriched articles
+    NER_COLLECTION: str = field(
+        default_factory=lambda: _env("NER_COLLECTION", "ner_articles")
+    )
+
     # ------------------------------------------------------------------
     # Scheduler
     # ------------------------------------------------------------------

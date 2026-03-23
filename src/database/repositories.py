@@ -17,11 +17,13 @@ from pymongo.collection import Collection
 from pymongo.errors import BulkWriteError, DuplicateKeyError
 
 from config.settings import settings
-from database.connection import get_clean_db, get_raw_db
+from database.connection import get_clean_db, get_raw_db, get_ner_db
 from database.models import (
     ARTICLE_VALIDATOR,
     CLEAN_INDEXES,
     RAW_INDEXES,
+    NER_ARTICLE_VALIDATOR,
+    NER_INDEXES,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,15 @@ def get_clean_collection() -> Collection:
         settings.CLEAN_COLLECTION,
         ARTICLE_VALIDATOR,
         CLEAN_INDEXES,
+    )
+
+
+def get_ner_collection() -> Collection:
+    return _ensure_collection(
+        get_ner_db(),
+        settings.NER_COLLECTION,
+        NER_ARTICLE_VALIDATOR,
+        NER_INDEXES,
     )
 
 
@@ -147,6 +158,28 @@ def upsert_clean_articles(articles: list[dict[str, Any]]) -> int:
         logger.warning("Clean bulk write partial error: %s", exc.details)
 
     logger.info("Upserted %d clean articles.", upserted)
+    return upserted
+
+
+def get_unprocessed_clean_articles() -> list[dict]:
+    """Return clean articles not yet processed by the NER job."""
+    processed_urls = set(get_ner_collection().distinct("url"))
+    return list(get_clean_collection().find({"url": {"$nin": list(processed_urls)}}))
+
+
+def insert_ner_articles(articles: list[dict]) -> int:
+    """Upsert NER-enriched articles. Returns upserted + modified count."""
+    if not articles:
+        return 0
+    col = get_ner_collection()
+    ops = [UpdateOne({"url": a["url"]}, {"$set": a}, upsert=True) for a in articles]
+    try:
+        result = col.bulk_write(ops, ordered=False)
+        upserted = result.upserted_count + result.modified_count
+    except BulkWriteError as exc:
+        upserted = exc.details.get("nUpserted", 0)
+        logger.warning("NER bulk write partial error: %s", exc.details)
+    logger.info("Upserted %d NER articles.", upserted)
     return upserted
 
 
