@@ -105,11 +105,12 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
             get_ner_collection,
             insert_ner_articles,
         )
-        from features.ner_extractor import batch_extract
+        from features.ner_extractor import batch_extract, get_device_label
 
         init_databases()
 
         _print(INFO, "=== NER (classify) job started ===")
+        _print(INFO, f"Loading NER model... (device: {get_device_label()})")
 
         articles = get_unprocessed_clean_articles()
         _print(INFO, f"Unprocessed clean articles: {len(articles):,}")

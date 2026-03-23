@@ -19,26 +19,44 @@ logger = logging.getLogger(__name__)
 _MODEL_NAME = "dslim/bert-base-NER"
 _MAX_TOKENS = 512
 _pipeline = None
+_device_label: str = "cpu"
 
 
 def _get_pipeline():
     """Return the NER pipeline, loading it on first call."""
-    global _pipeline
+    global _pipeline, _device_label
     if _pipeline is None:
         try:
+            import torch
             from transformers import pipeline as hf_pipeline
             logger.info("Loading NER model: %s", _MODEL_NAME)
+            if torch.cuda.is_available():
+                device = 0
+                _device_label = f"cuda ({torch.cuda.get_device_name(0)})"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+                _device_label = "mps (Apple Metal)"
+            else:
+                device = -1
+                _device_label = "cpu"
             _pipeline = hf_pipeline(
                 "ner",
                 model=_MODEL_NAME,
                 aggregation_strategy="simple",
+                device=device,
             )
-            logger.info("NER model loaded.")
+            logger.info("NER model loaded on %s.", _device_label)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load NER model '{_MODEL_NAME}': {exc}"
             ) from exc
     return _pipeline
+
+
+def get_device_label() -> str:
+    """Load the pipeline if needed and return a human-readable device string."""
+    _get_pipeline()
+    return _device_label
 
 
 def extract_entities(text: str) -> list[dict[str, Any]]:
@@ -110,7 +128,7 @@ def batch_extract(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
         texts.append(body)
 
     # Run BERT inference in one batched call
-    all_raw = nlp(texts)
+    all_raw = nlp(texts, batch_size=len(texts))
 
     enriched = []
     for article, raw_entities in zip(articles, all_raw):

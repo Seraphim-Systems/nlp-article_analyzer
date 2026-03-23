@@ -80,10 +80,20 @@ services:
       SKIP_RANK1_RECOVERY: "true"
       RUN_CLEAN_AFTER_SCRAPE: "true"
       ENGLISH_ONLY: "true"
+      OMP_NUM_THREADS: "10"
+      MKL_NUM_THREADS: "10"
+      NVIDIA_VISIBLE_DEVICES: "all"
     # Entrypoint handles init + bootstrap, then waits for manual job execution
     # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape
     # Or schedule via cron using orchestrate_jobs.sh
     command: wait
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
