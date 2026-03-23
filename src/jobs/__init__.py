@@ -64,10 +64,13 @@ def run_job(
         from jobs.evaluate_job import run as evaluate_run
 
         return evaluate_run(dry_run=dry_run)
+    elif job_name == "analyze":
+        from jobs.analyze_job import run as analyze_run
+
+        return analyze_run(dry_run=dry_run)
     else:
         raise ValueError(
-            f"Unknown job: {job_name}. "
-            f"Valid jobs: scrape, clean, classify, ner, evaluate"
+            f"Unknown job: {job_name}. Valid jobs: scrape, clean, classify, ner, evaluate"
         )
 
 

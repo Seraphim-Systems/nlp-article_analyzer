@@ -19,8 +19,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import date
+
+# Add the 'src' directory to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+src_path = os.path.join(project_root, "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 # Configure logging first, before any imports that log
 logging.basicConfig(
@@ -49,7 +56,7 @@ Examples:
         "job",
         nargs="?",
         default="scrape",
-        choices=["scrape", "clean", "classify", "ner", "evaluate"],
+        choices=["scrape", "clean", "classify", "ner", "evaluate", "analyze"],
         help="Job to run (default: scrape)",
     )
 

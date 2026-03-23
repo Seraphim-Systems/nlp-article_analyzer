@@ -19,17 +19,17 @@ from pymongo.collection import Collection
 from pymongo.errors import BulkWriteError, DuplicateKeyError
 
 from config.settings import settings
-from database.connection import get_clean_db, get_raw_db, get_ner_db
+from database.connection import get_clean_db, get_ner_db, get_raw_db
 from database.models import (
     ARTICLE_VALIDATOR,
     CLEAN_INDEXES,
-    RAW_INDEXES,
+    ENTITY_INDEXES,
+    ENTITY_VALIDATOR,
     NER_ARTICLE_VALIDATOR,
     NER_INDEXES,
-    ENTITY_VALIDATOR,
-    ENTITY_INDEXES,
-    SENTENCE_VALIDATOR,
+    RAW_INDEXES,
     SENTENCE_INDEXES,
+    SENTENCE_VALIDATOR,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,9 +123,7 @@ def insert_raw_articles(articles: list[dict[str, Any]]) -> int:
     for a in articles:
         a.setdefault("ret", now_iso)
 
-    ops = [
-        UpdateOne({"url": a["url"]}, {"$setOnInsert": a}, upsert=True) for a in articles
-    ]
+    ops = [UpdateOne({"url": a["url"]}, {"$setOnInsert": a}, upsert=True) for a in articles]
     try:
         result = col.bulk_write(ops, ordered=False)
         inserted = result.upserted_count
@@ -270,9 +268,34 @@ def count_clean_articles() -> int:
 
 def count_raw_articles_by_rank() -> dict[int, int]:
     pipeline = [{"$group": {"_id": "$rank", "count": {"$sum": 1}}}]
-    return {
-        doc["_id"]: doc["count"] for doc in get_raw_collection().aggregate(pipeline)
-    }
+    return {doc["_id"]: doc["count"] for doc in get_raw_collection().aggregate(pipeline)}
+
+
+def get_unprocessed_topic_articles(limit: int = 1000) -> list[dict]:
+    """Fetch clean articles that don't have a topic_label yet."""
+    return list(get_clean_collection().find({"topic_label": {"$exists": False}}, limit=limit))
+
+
+def update_article_topics(updates: list[dict]) -> int:
+    """Bulk update articles with topics and keywords."""
+    if not updates:
+        return 0
+    col = get_clean_collection()
+    ops = [
+        UpdateOne(
+            {"url": u["url"]},
+            {
+                "$set": {
+                    "topic_label": u["topic_label"],
+                    "topic_score": u["topic_score"],
+                    "keywords": u["keywords"],
+                }
+            },
+        )
+        for u in updates
+    ]
+    result = col.bulk_write(ops, ordered=False)
+    return result.modified_count
 
 
 # ---------------------------------------------------------------------------

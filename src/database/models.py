@@ -121,6 +121,13 @@ ARTICLE_VALIDATOR: dict[str, Any] = {
                 "enum": [0, 1, 2, None],
                 "description": "Data-quality rank (0=complete, 1=minor gaps, 2=discard)",
             },
+            "topic_label": {"bsonType": ["string", "null"], "description": "Predicted category"},
+            "topic_score": {"bsonType": ["double", "null"], "description": "Confidence score"},
+            "keywords": {
+                "bsonType": ["array", "null"],
+                "items": {"bsonType": "string"},
+                "description": "Top subject keywords extracted via TF-IDF"
+            },
         },
     }
 }
@@ -146,6 +153,7 @@ CLEAN_INDEXES = [
     {"keys": [("feed", 1)], "options": {"name": "feed_idx"}},
     {"keys": [("pub", -1)], "options": {"name": "pub_date_idx"}},
     {"keys": [("lang", 1)], "options": {"name": "lang_idx"}},
+    {"keys": [("topic_label", 1)], "options": {"name": "topic_idx"}},
 ]
 
 
