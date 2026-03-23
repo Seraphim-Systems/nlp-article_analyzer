@@ -195,6 +195,21 @@ class Settings:
         default_factory=lambda: _env("SKIP_RANK1_RECOVERY", "false").lower() == "true"
     )
 
+    def validate(self) -> None:
+        """
+        Raise EnvironmentError if required settings are missing.
+        Called at container startup — surfaces misconfiguration immediately.
+        """
+        errors = []
+        if not self.MONGO_URI:
+            errors.append("MONGO_URI is required")
+        if self.KAGGLE_ENABLED and not self.KAGGLE_KEY:
+            errors.append("KAGGLE_KEY is required when KAGGLE_ENABLED=true")
+        if errors:
+            raise EnvironmentError(
+                "Missing required configuration:\n  " + "\n  ".join(errors)
+            )
+
 
 # Singleton instance used throughout the project
 settings = Settings()
