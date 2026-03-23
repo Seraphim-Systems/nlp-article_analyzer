@@ -57,15 +57,31 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
             logger.info("No unprocessed articles — nothing to do.")
             return result
 
-        enriched = batch_extract(articles)
-        logger.info("NER extraction complete: %d articles enriched", len(enriched))
+        from tqdm import tqdm
 
-        if dry_run:
-            logger.info("DRY RUN: would write %d articles to ner_articles", len(enriched))
+        BATCH = 64
+        enriched: list[dict[str, Any]] = []
+        total_written = 0
+
+        for i in tqdm(range(0, len(articles), BATCH), desc="  NER", unit="batch", ncols=80):
+            chunk = articles[i : i + BATCH]
+            enriched_chunk = batch_extract(chunk)
+            enriched.extend(enriched_chunk)
+
+            if not dry_run and len(enriched) >= BATCH * 4:
+                total_written += insert_ner_articles(enriched)
+                enriched = []
+
+        if not dry_run:
+            if enriched:
+                total_written += insert_ner_articles(enriched)
+            result["classified_count"] = total_written
+            logger.info("Wrote %d NER articles to ner_articles", total_written)
         else:
-            count = insert_ner_articles(enriched)
-            result["classified_count"] = count
-            logger.info("Wrote %d NER articles to ner_articles", count)
+            result["classified_count"] = len(articles)
+            logger.info("DRY RUN: would write %d articles to ner_articles", len(articles))
+
+        logger.info("NER extraction complete: %d articles enriched", len(articles))
 
     except Exception as e:
         logger.exception("Classify job failed")

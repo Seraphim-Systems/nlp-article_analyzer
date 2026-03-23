@@ -80,7 +80,7 @@ def extract_entities(text: str) -> list[dict[str, Any]]:
 
 def batch_extract(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Run NER extraction on a list of article dicts.
+    Run NER extraction on a list of article dicts using BERT batching.
 
     Each article must have a `body` field. Returns a new list of dicts
     with an `entities` key added to each article.
@@ -95,11 +95,39 @@ def batch_extract(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     list[dict]
         Same articles with `entities: list[dict]` added.
     """
-    enriched = []
+    if not articles:
+        return []
+
+    nlp = _get_pipeline()
+
+    # Truncate each body to _MAX_TOKENS words
+    texts = []
     for article in articles:
         body = article.get("body") or ""
-        entities = extract_entities(body)
+        words = body.split()
+        if len(words) > _MAX_TOKENS:
+            body = " ".join(words[:_MAX_TOKENS])
+        texts.append(body)
+
+    # Run BERT inference in one batched call
+    all_raw = nlp(texts)
+
+    enriched = []
+    for article, raw_entities in zip(articles, all_raw):
+        # nlp() on a list returns a list of lists
+        if isinstance(raw_entities, dict):
+            raw_entities = [raw_entities]
+        entities = [
+            {
+                "text":  ent["word"],
+                "label": ent["entity_group"],
+                "start": ent["start"],
+                "end":   ent["end"],
+            }
+            for ent in raw_entities
+        ]
         enriched.append({**article, "entities": entities})
+
     return enriched
 
 

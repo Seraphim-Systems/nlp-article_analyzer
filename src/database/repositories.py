@@ -230,8 +230,13 @@ def upsert_clean_articles(articles: list[dict[str, Any]]) -> int:
         result = col.bulk_write(ops, ordered=False)
         upserted = result.upserted_count + result.modified_count
     except BulkWriteError as exc:
-        upserted = exc.details.get("nUpserted", 0)
-        logger.warning("Clean bulk write partial error: %s", exc.details)
+        upserted = exc.details.get("nUpserted", 0) + exc.details.get("nModified", 0)
+        errors = exc.details.get("writeErrors", [])
+        logger.warning(
+            "Clean bulk write partial error: %d write error(s), codes=%s",
+            len(errors),
+            [e.get("code") for e in errors[:5]],
+        )
 
     logger.info("Upserted %d clean articles.", upserted)
     return upserted
