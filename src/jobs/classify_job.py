@@ -138,7 +138,11 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
 
         for i in pbar:
             chunk = articles[i : i + BATCH]
+
+            _batch_start = time.time()
             enriched_chunk = batch_extract(chunk)
+            _batch_duration = time.time() - _batch_start
+
             pending.extend(enriched_chunk)
 
             batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
@@ -150,6 +154,23 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
                 ents=f"{total_entities:,}",
                 db=f"{total_written:,}",
             )
+
+            # Prometheus instrumentation (no-op if running outside API context)
+            try:
+                from web.prometheus_metrics import (
+                    NER_ARTICLES_PROCESSED_TOTAL,
+                    NER_BATCH_DURATION_SECONDS,
+                    NER_ENTITIES_EXTRACTED_TOTAL,
+                )
+                NER_ARTICLES_PROCESSED_TOTAL.inc(len(chunk))
+                NER_BATCH_DURATION_SECONDS.observe(_batch_duration)
+                for a in enriched_chunk:
+                    for ent in a.get("entities", []):
+                        NER_ENTITIES_EXTRACTED_TOTAL.labels(
+                            entity_type=ent.get("label", "MISC")
+                        ).inc()
+            except ImportError:
+                pass
 
             if not dry_run and len(pending) >= FLUSH_EVERY:
                 flushed = insert_ner_articles(pending)
