@@ -19,7 +19,7 @@ from pymongo.collection import Collection
 from pymongo.errors import BulkWriteError, DuplicateKeyError
 
 from config.settings import settings
-from database.connection import get_clean_db, get_ner_db, get_raw_db
+from database.connection import get_clean_db, get_models_db, get_ner_db, get_raw_db
 from database.models import (
     ARTICLE_VALIDATOR,
     CLEAN_INDEXES,
@@ -296,6 +296,28 @@ def update_article_topics(updates: list[dict]) -> int:
     ]
     result = col.bulk_write(ops, ordered=False)
     return result.modified_count
+
+
+# ---------------------------------------------------------------------------
+# Model run operations
+# ---------------------------------------------------------------------------
+
+
+def insert_model_run(doc: dict[str, Any]) -> str:
+    """Insert one evaluation run document into nlp_models.model_runs.
+
+    Returns the inserted document's ``_id`` as a string.
+    """
+    col = get_models_db()["model_runs"]
+    result = col.insert_one(doc)
+    logger.info("Inserted model run with _id=%s", result.inserted_id)
+    return str(result.inserted_id)
+
+
+def get_latest_model_run() -> dict[str, Any] | None:
+    """Return the most recent model run document, or None if no runs exist."""
+    col = get_models_db()["model_runs"]
+    return col.find_one({}, sort=[("created_at", -1)])
 
 
 # ---------------------------------------------------------------------------

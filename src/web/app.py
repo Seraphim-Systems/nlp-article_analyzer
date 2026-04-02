@@ -108,6 +108,8 @@ class MetricsResponse(BaseModel):
     precision: float | None = None
     recall: float | None = None
     f1: float | None = None
+    per_entity: dict[str, dict] | None = None
+    sample_size: int | None = None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -489,12 +491,33 @@ async def tfidf_comparison(
 
 
 # ──────────────────────────────────────────────────────────────
-# Metrics (stub — Phase 5)
+# Metrics
 # ──────────────────────────────────────────────────────────────
 
 
 @app.get("/metrics", tags=["metrics"], response_model=MetricsResponse)
 async def get_metrics() -> MetricsResponse:
-    return MetricsResponse()
+    """Return the latest NER evaluation metrics, or empty response if none exist yet."""
+    from evaluation.sample_loader import load_latest_run_metrics
+
+    run = load_latest_run_metrics()
+    if run is None:
+        return MetricsResponse()
+
+    metrics = run.get("metrics", {})
+    overall = metrics.get("overall", {})
+
+    # Strip the overall key from per_entity so it only contains label-level data
+    per_entity = {k: v for k, v in metrics.items() if k != "overall"} or None
+
+    return MetricsResponse(
+        model_version=run.get("model_version"),
+        last_updated=run.get("created_at"),
+        precision=overall.get("precision"),
+        recall=overall.get("recall"),
+        f1=overall.get("f1"),
+        per_entity=per_entity,
+        sample_size=run.get("training_set_size"),
+    )
 
 
