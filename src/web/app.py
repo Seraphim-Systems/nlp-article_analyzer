@@ -24,8 +24,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict
+
+from web.middleware import PrometheusMiddleware
 
 from config.settings import settings
 from database.repositories import (
@@ -108,6 +110,8 @@ class MetricsResponse(BaseModel):
     precision: float | None = None
     recall: float | None = None
     f1: float | None = None
+    per_entity: dict[str, dict] | None = None
+    sample_size: int | None = None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -125,6 +129,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Failed to initialize databases on startup: %s", e)
         raise
+
+    try:
+        from prometheus_client import REGISTRY
+        from web.mongo_collector import MongoCollector
+        REGISTRY.register(MongoCollector())
+        logger.info("MongoCollector registered with Prometheus")
+    except Exception as e:
+        logger.warning("Could not register MongoCollector: %s", e)
+
     yield
     # Shutdown
     try:
@@ -146,6 +159,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(PrometheusMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -249,22 +263,32 @@ async def get_stats() -> dict:
 
 def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
     """Execute a job in a background thread and record result."""
+    import time as _time
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
+    _start = _time.perf_counter()
+    _status = "failed"
     try:
         from jobs import run_job
         result = run_job(job_name, dry_run=dry_run)
-        status = "success" if result.get("status") == "success" else "failed"
+        _status = "success" if result.get("status") == "success" else "failed"
         with _jobs_lock:
-            _jobs[job_id]["status"] = status
+            _jobs[job_id]["status"] = _status
             _jobs[job_id]["result"] = result
     except Exception as e:
         with _jobs_lock:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["result"] = {"error": str(e)}
     finally:
+        _duration = _time.perf_counter() - _start
         with _jobs_lock:
             _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        try:
+            from web.prometheus_metrics import JOB_DURATION_SECONDS, JOB_RUNS_TOTAL
+            JOB_DURATION_SECONDS.labels(job_name=job_name, status=_status).observe(_duration)
+            JOB_RUNS_TOTAL.labels(job_name=job_name, status=_status).inc()
+        except Exception:
+            pass
 
 
 @app.post("/jobs/trigger", tags=["jobs"], response_model=JobTriggerResponse)
@@ -489,12 +513,45 @@ async def tfidf_comparison(
 
 
 # ──────────────────────────────────────────────────────────────
-# Metrics (stub — Phase 5)
+# Metrics
 # ──────────────────────────────────────────────────────────────
 
 
 @app.get("/metrics", tags=["metrics"], response_model=MetricsResponse)
 async def get_metrics() -> MetricsResponse:
-    return MetricsResponse()
+    """Return the latest NER evaluation metrics, or empty response if none exist yet."""
+    from evaluation.sample_loader import load_latest_run_metrics
+
+    run = load_latest_run_metrics()
+    if run is None:
+        return MetricsResponse()
+
+    metrics = run.get("metrics", {})
+    overall = metrics.get("overall", {})
+
+    # Strip the overall key from per_entity so it only contains label-level data
+    per_entity = {k: v for k, v in metrics.items() if k != "overall"} or None
+
+    return MetricsResponse(
+        model_version=run.get("model_version"),
+        last_updated=run.get("created_at"),
+        precision=overall.get("precision"),
+        recall=overall.get("recall"),
+        f1=overall.get("f1"),
+        per_entity=per_entity,
+        sample_size=run.get("training_set_size"),
+    )
+
+
+# ──────────────────────────────────────────────────────────────
+# Prometheus scrape endpoint
+# ──────────────────────────────────────────────────────────────
+
+
+@app.get("/prometheus-metrics", include_in_schema=False)
+async def prometheus_metrics() -> Response:
+    """Prometheus text-format metrics endpoint — scraped by Prometheus every 15s."""
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
