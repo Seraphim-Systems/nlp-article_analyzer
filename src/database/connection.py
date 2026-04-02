@@ -57,6 +57,11 @@ def get_ner_db() -> Database:
     return get_client()[settings.NER_DB_NAME]
 
 
+def get_models_db() -> Database:
+    """Return the models and metrics database."""
+    return get_client()[settings.MODELS_DB_NAME]
+
+
 def close_connection() -> None:
     """Close the MongoDB client (call on application shutdown)."""
     client = get_client()
