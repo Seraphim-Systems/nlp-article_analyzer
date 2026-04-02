@@ -132,21 +132,6 @@ def run(dry_run: bool = False) -> dict[str, Any]:
         else:
             logger.info("DRY RUN: metrics computed but not persisted.")
 
-        # ── 5. Update Prometheus gauges (optional — only available in API context)
-        try:
-            from web.prometheus_metrics import (
-                EVAL_PRECISION,
-                EVAL_RECALL,
-                EVAL_F1,
-                EVAL_LAST_RUN_TIMESTAMP,
-            )
-            for label, r in eval_results.items():
-                EVAL_PRECISION.labels(entity_type=label).set(r.precision)
-                EVAL_RECALL.labels(entity_type=label).set(r.recall)
-                EVAL_F1.labels(entity_type=label).set(r.f1)
-            EVAL_LAST_RUN_TIMESTAMP.set(time.time())
-        except ImportError:
-            pass  # running outside API context (e.g. scripts/run_job.py) — skip
 
     except Exception as e:
         logger.exception("Evaluate job failed")

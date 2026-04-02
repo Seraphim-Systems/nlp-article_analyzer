@@ -75,33 +75,6 @@ NER_BATCH_DURATION_SECONDS = Histogram(
 )
 
 # ---------------------------------------------------------------------------
-# Evaluation metrics  (Gauges — hold the most recent run's values)
-# ---------------------------------------------------------------------------
-
-EVAL_PRECISION = Gauge(
-    "eval_precision",
-    "NER evaluation precision for the latest run",
-    ["entity_type"],
-)
-
-EVAL_RECALL = Gauge(
-    "eval_recall",
-    "NER evaluation recall for the latest run",
-    ["entity_type"],
-)
-
-EVAL_F1 = Gauge(
-    "eval_f1",
-    "NER evaluation F1 score for the latest run",
-    ["entity_type"],
-)
-
-EVAL_LAST_RUN_TIMESTAMP = Gauge(
-    "eval_last_run_timestamp",
-    "Unix timestamp of the most recent evaluation run",
-)
-
-# ---------------------------------------------------------------------------
 # MongoDB collection sizes  (populated by MongoCollector on each scrape)
 # ---------------------------------------------------------------------------
 
