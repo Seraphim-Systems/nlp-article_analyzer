@@ -79,6 +79,13 @@ Examples:
         help="Output result as JSON instead of human-readable text.",
     )
 
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Maximum number of articles to process (0 for unlimited).",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -89,6 +96,7 @@ Examples:
             job_name=args.job,
             for_date=args.date,
             dry_run=args.dry_run,
+            limit=args.limit,
         )
 
         if args.json:

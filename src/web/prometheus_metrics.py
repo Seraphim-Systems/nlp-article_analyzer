@@ -106,9 +106,4 @@ NER_BATCH_DURATION_SECONDS = _get_metric(
 # MongoDB collection sizes
 # ---------------------------------------------------------------------------
 
-MONGO_COLLECTION_SIZE = _get_metric(
-    Gauge,
-    "mongo_collection_size",
-    "Number of documents in a MongoDB collection",
-    ["database", "collection"],
-)
+# Note: Handled dynamically by MongoCollector in web/mongo_collector.py

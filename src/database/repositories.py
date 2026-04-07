@@ -179,9 +179,12 @@ def insert_raw_articles(articles: list[dict[str, Any]]) -> int:
     return inserted
 
 
-def get_raw_articles_by_rank(rank: int) -> Iterator[dict[str, Any]]:
+def get_raw_articles_by_rank(rank: int, limit: int = 0) -> Iterator[dict[str, Any]]:
     """Iterate over raw articles matching a cleaning rank."""
-    return get_raw_collection().find({"rank": rank})
+    query = get_raw_collection().find({"rank": rank})
+    if limit > 0:
+        query = query.limit(limit)
+    return query
 
 
 def update_raw_rank(url: str, rank: int, reasons: list[str] | None = None) -> None:
@@ -284,10 +287,13 @@ def upsert_clean_articles(articles: list[dict[str, Any]]) -> int:
     return upserted
 
 
-def get_unprocessed_clean_articles() -> list[dict]:
+def get_unprocessed_clean_articles(limit: int = 0) -> list[dict]:
     """Return clean articles not yet processed by the NER job."""
     processed_urls = set(get_ner_collection().distinct("url"))
-    return list(get_clean_collection().find({"url": {"$nin": list(processed_urls)}}))
+    query = get_clean_collection().find({"url": {"$nin": list(processed_urls)}})
+    if limit > 0:
+        query = query.limit(limit)
+    return list(query)
 
 
 def insert_ner_articles(articles: list[dict]) -> int:
