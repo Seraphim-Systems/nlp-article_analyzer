@@ -42,7 +42,7 @@ jobs:
             echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
             
             # 1. Prepare directory
-            mkdir -p ${{ inputs.deploy_path }}
+            mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo,prometheus,grafana}
             cd ${{ inputs.deploy_path }}
 
             # 2. Sync Code
