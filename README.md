@@ -1,187 +1,176 @@
 # NLP Article Analyzer
 
-End-to-end NLP pipeline that scrapes news articles from RSS feeds, cleans them, runs named-entity recognition, and produces TF-IDF comparisons of clean vs. NER-enhanced text.
+![Docker](https://img.shields.io/badge/Docker-Enabled-blue)
+![Python](https://img.shields.io/badge/Python-3.11-yellow)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.109-green)
+![React](https://img.shields.io/badge/React-Vite-purple)
+![MongoDB](https://img.shields.io/badge/MongoDB-7.0-darkgreen)
+![HuggingFace](https://img.shields.io/badge/HuggingFace-Transformers-orange)
+
+An **end-to-end NLP data pipeline and visualization stack** that scrapes news articles from RSS feeds, performs quality-filtering and cleaning, runs local **Named Entity Recognition (NER)** using BERT models, and provides analytical tools (like TF-IDF comparisons) to evaluate named-entity enhancement compared to a traditional approach.
 
 ---
 
-## Pipeline Stages
+## Features
 
-| Stage | Job name | What it does |
-|-------|----------|--------------|
-| Scrape | `scrape` | Collects articles from RSS feeds via newspaper3k |
-| Clean | `clean` | Quality-filters and ranks articles (0 = complete, 1 = incomplete, 2 = discard) |
-| NER | `ner` | Runs `dslim/bert-base-NER` over clean articles; stores entity spans in `nlp_ner` |
-| Evaluate | `evaluate` | Computes model metrics against stored runs |
+- **Automated RSS Scraping**: Ingests breaking news from high-quality RSS feeds (BBC, Reuters, etc.) using `newspaper3k`.
+- **Quality Cleaning & Ranking**: Ranks articles by data completeness (Rank 0: perfect, Rank 1: minor gaps, Rank 2: discard) and recovers incomplete articles via localized URL re-fetching.
+- **Named Entity Recognition (NER)**: Applies `dslim/bert-base-NER` to detect Persons (PER), Organizations (ORG), Locations (LOC), and Misc (MISC) directly on hardware.
+- **Extensible FastAPI Backend**: A RESTful, high-concurrency API acting as orchestrator to poll jobs, serve articles, provide metrics, and calculate TF-IDF comparison metrics.
+- **React/Vite Frontend**: Real-time interface for data exploration, results visualization and administration (served on port 5173).
+- **Robust Storage**: Uses logically isolated MongoDB databases for distinct pipeline stages (Raw, Clean, NER, Models).
 
 ---
 
-## Stack
+## Architecture & Data Flow
 
-Python 3.11 · FastAPI · React/Vite · MongoDB 7 · Docker Compose · HuggingFace Transformers · BERT NER (`dslim/bert-base-NER`)
+The project processes data sequentially through structured stages, avoiding data corruption by maintaining the states isolated.
+
+```mermaid
+flowchart LR
+    A[RSS Feeds] -->|Scrape| B[(nlp_raw)]
+    B -->|Clean / Rank| C[(nlp_clean)]
+    C -->|Classify (NER)| D[(nlp_ner)]
+    D --> E[FastAPI & Metrics]
+    E --> F[React Dashboard]
+```
+
+1. **Scrape**: Fetches raw data to `nlp_raw.articles`. Includes metadata (URL, publisher, language).
+2. **Clean**: Filters high-quality articles and moves them to `nlp_clean.articles`.
+3. **Classify (NER)**: Evaluates clean text, extracting character offsets for entities, saving to `nlp_ner.ner_articles`.
+4. **Evaluate**: Computes ML metrics (against cached runs) and stores them for performance tracking.
 
 ---
 
 ## Prerequisites
 
-- Docker Desktop 4.x (Engine 20.10+, Compose 2.0+)
-- 8 GB RAM, 4 CPU cores
-- GPU optional — NER runs on CPU by default; set `NVIDIA_VISIBLE_DEVICES=all` in `.env` for GPU acceleration
+- **Docker Desktop** (Engine 20.10+, Compose 2.0+)
+- **System Memory**: Minimum 8 GB RAM, 4 CPU cores
+- *(Optional)* **GPU**: For accelerated NER. By default, it runs on CPU in Docker. Configure `.env` (`NVIDIA_VISIBLE_DEVICES=all`) for GPU acceleration.
 
 ---
 
-## One-Shot Setup
+## Quickstart (Docker)
+
+The fastest way to spin up the entire end-to-end stack is with Docker Compose.
 
 ```bash
+# 1. Clone the repository
 git clone <repo-url> nlp-article_analyzer
 cd nlp-article_analyzer
-cp .env.example .env          # edit KAGGLE_KEY if you want dataset bootstrap
+
+# 2. Setup your environment
+cp .env.example .env
+
+# Optional: Add Kaggle API key to .env for bootstrapping historical data
+# KAGGLE_KEY=your_key_here
+
+# 3. Spin up all infrastructure and wait for data bootstrap
 docker compose up --build -d
 ```
 
-Services start in order: MongoDB → jobs (bootstrap) → API → frontend.
+**Boot Sequence:**
+`MongoDB` ➔ `Jobs Orchestrator` (creates DBs & auto-bootstraps) ➔ `API` ➔ `Frontend`
 
-### With a team database dump
+### Available Services
+
+| Service | Address | Description |
+|---------|---------|-------------|
+| **Frontend UI** | [http://localhost:5173](http://localhost:5173) | Main application visual dashboard |
+| **API Server** | [http://localhost:8000](http://localhost:8000) | Main FastAPI Router |
+| **API Docs** | [http://localhost:8000/docs](http://localhost:8000/docs) | Swagger Interactive Documentation |
+| **MongoDB** | `localhost:27017` | Local DB Cluster (no auth locally) |
+
+---
+
+## Pipeline Execution
+
+You can run individual pipeline stages manually but using Docker makes sure all dependencies and models are routed well.
 
 ```bash
-cp .env.example .env
-docker compose up --build -d mongodb   # start only MongoDB first
-bash scripts/db_restore.sh             # restore the dump (see Database Dump / Restore)
-docker compose up -d                   # bring up the rest
-```
-
----
-
-## Services
-
-| Service | URL | Notes |
-|---------|-----|-------|
-| API | http://localhost:8000 | FastAPI, port 8000 |
-| API Docs | http://localhost:8000/docs | Swagger UI |
-| Frontend | http://localhost:5173 | React/Vite dev server |
-| MongoDB | localhost:27017 | No auth in dev |
-
----
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/` | Version info |
-| `GET` | `/health` | Stack health check — MongoDB ping + collection counts |
-| `GET` | `/stats` | Lightweight collection document counts |
-| `POST` | `/jobs/trigger` | Trigger a pipeline job asynchronously (`scrape`, `clean`, `ner`, `evaluate`) |
-| `GET` | `/jobs` | List all tracked jobs |
-| `GET` | `/jobs/{job_id}` | Poll job status by ID |
-| `GET` | `/articles` | Paginated article list (`?collection=clean\|ner&search=...`) |
-| `GET` | `/articles/ner/{url_b64}` | NER-enriched article by base64-encoded URL |
-| `GET` | `/compare/tfidf` | TF-IDF comparison: clean text vs. NER-enhanced text |
-| `GET` | `/metrics` | Latest model evaluation metrics |
-
----
-
-## Running Jobs
-
-### Via Docker (recommended)
-
-```bash
-# Scrape articles from RSS feeds
+# 1. scrape real-time articles
 docker compose exec jobs python scripts/run_job.py scrape
 
-# Clean and rank articles
+# 2. clean and deduplicate raw articles
 docker compose exec jobs python scripts/run_job.py clean
 
-# Run NER extraction
+# 3. run NER on clean texts
 docker compose exec jobs python scripts/run_job.py ner
+# OR: docker compose exec jobs python scripts/run_job.py classify
 
-# Evaluate model
+# 4. generate system evaluations
 docker compose exec jobs python scripts/run_job.py evaluate
-
-# Optional flags
-docker compose exec jobs python scripts/run_job.py scrape --json     # JSON output
-docker compose exec jobs python scripts/run_job.py clean --dry-run   # preview only
 ```
 
-### Native NER (without Docker — uses MPS/CUDA/CPU)
+> **Tip:** You can append `--dry-run` to preview operations without writing to MongoDB. Append `--json` to output CLI logs as JSON.
 
-Run natively to leverage Apple Metal (MPS) or a local CUDA GPU — Docker cannot access these accelerators.
+---
+
+## Native Python Environment (For MPS / CUDA)
+
+Docker on macOS cannot access Apple Metal as discussed in class as well. To use native GPU compute, run the jobs natively:
 
 ```bash
+# Create and activate virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
+
+# Install dependencies (including ML packages)
 pip install -r requirements.txt -r requirements-heavy.txt
 
-# Auto-detects: CUDA → Apple Metal (MPS) → CPU
+# Start MongoDB only via docker
+docker compose up -d mongodb
+
+# Run your target jobs natively (auto-detects MPS / CUDA / CPU)
 PYTHONPATH=src:. .venv/bin/python scripts/run_job.py ner
 ```
 
-MongoDB must be running (`docker compose up -d mongodb`) before the native process starts.
+---
+
+## Core API Endpoints
+
+The FastAPI server provides granular interaction with the pipelines and analyzed data:
+
+| Method | Endpoint | Use Case |
+|--------|----------|----------|
+| `GET` | `/health` | Validates MongoDB ping, collection status, and system health. |
+| `POST` | `/jobs/trigger` | Triggers pipeline jobs (`scrape`, `clean`, `ner`). Executed asynchronously. |
+| `GET` | `/articles` | Retrieve paginated articles (`?collection=clean&search=foo`). |
+| `GET` | `/articles/ner/{url_b64}`| Fetch deep details of an NER-enriched article. |
+| `GET` | `/compare/tfidf` | Perform computational TD-IDF analysis (Clean vs. NER outputs). |
+| `GET` | `/metrics` | Retrieve the latest historical model metrics. |
 
 ---
 
-## Database Dump / Restore
+## 🗄️ Database Management
 
-Scripts use `mongodump` / `mongorestore` against the running container.
+Included bash scripts facilitate safe handling of database states:
 
 ```bash
-# Dump all databases to ~/Downloads/ (prints the filename on completion)
+# Dump the active database state to a tar.gz in ~/Downloads
 bash scripts/db_dump.sh
 
-# Restore from a specific archive, then start the full stack
+# Restore the application from a known archive dump
 bash scripts/db_restore.sh ~/Downloads/nlp_mongo_dump_YYYYMMDD_HHMMSS.tar.gz
-docker compose up -d
 ```
 
-`db_dump.sh` runs `mongodump` against the running container and compresses the output to a dated `.tar.gz` in `~/Downloads/` (or a custom path passed as the first argument). `db_restore.sh` takes the archive path, extracts it, and runs `mongorestore --drop` inside the container — existing data is overwritten. Run `docker compose up -d` after restore to bring up the API and frontend.
+_Note: `db_restore.sh` drops current collections and enforces an overwrite._
 
 ---
 
-## Environment Variables
+## Project Structure
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
-| `KAGGLE_ENABLED` | `false` | Download and ingest Kaggle dataset on first boot (jobs service only) |
-| `KAGGLE_KEY` | _(empty)_ | Kaggle API key (modern tokens only) |
-| `SKIP_BOOTSTRAP` | `false` | Skip dataset bootstrap entirely (set `true` after first run) |
-| `LOG_LEVEL` | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-
-See `.env.example` for the full list including database names, collection names, and scheduler settings.
-
----
-
-## Development
-
-```bash
-# Follow logs
-docker compose logs -f api
-docker compose logs -f jobs
-
-# Rebuild after code changes
-docker compose up --build -d
-
-# Stop all services
-docker compose down
-
-# Stop and wipe volumes (full reset)
-docker compose down --volumes
-
-# Open MongoDB shell
-docker compose exec mongodb mongosh
-```
-
-### Project structure
-
-```
-src/
-  web/          FastAPI app and endpoints
-  jobs/         Job orchestration (scrape, clean, ner, evaluate)
-  scraper/      RSS feed collection
-  cleaning/     Quality filtering and ranking
-  database/     MongoDB connection, models, repositories
-  modelling/    ML model wrappers
-  evaluation/   Metric computation
-
-config/         Environment-driven settings (settings.py)
-scripts/        run_job.py, db_dump.sh, db_restore.sh
-frontend/       React/Vite app
+```text
+nlp-article_analyzer/
+├── config/              # Centralized settings & environmental configs
+├── docs/                # Extended system plans and architecture
+├── frontend/            # React/Vite visualization application
+├── scripts/             # Job runners, bootstrapping, & database migrations
+└── src/                 # Main Python logic
+    ├── cleaning/        # Text truncation, deduplication, and ranking rules
+    ├── database/        # Pymongo adapters, models, schema enforcement
+    ├── features/        # NLP routines (BERT NER setup)
+    ├── jobs/            # Job orchestrations (scrape_job, clean_job...)
+    ├── scraper/         # RSS parsing & newspaper3k extractors
+    └── web/             # FastAPI backend (routers, metrics, dependency injection)
 ```
