@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: "production"
+      env_vars:
+        description: "Newline separated list of ENV_VAR=value"
+        required: false
+        type: string
+        default: ""
     secrets:
       HETZNER_IP:
         required: true
@@ -51,7 +56,12 @@ jobs:
               git reset --hard origin/${{ github.ref_name }}
             fi
 
-            # 3. Identify Compose File
+            # 3. Create .env file
+            echo "--- Creating .env file ---"
+            printf "%b" "${{ inputs.env_vars }}" > .env
+            echo "Successfully created .env"
+
+            # 4. Identify Compose File
             COMPOSE_FILE="docker-compose.yml"
             [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
             echo "Using config: $COMPOSE_FILE"

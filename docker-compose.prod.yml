@@ -82,7 +82,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nlp-analyzer:latest
+    image: seraphim-systems/nlp-article-analyzer:latest
     container_name: nlp_jobs_prod
     restart: always
     depends_on:
@@ -123,13 +123,35 @@ services:
         max-file: "5"
         labels: "service=jobs"
 
+  # ── Frontend dashboard (React SPA) ──────────────────────────────────────
+  # Serves the static assets and proxies /api to the backend service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    image: nlp-frontend:latest
+    container_name: nlp_frontend_prod
+    restart: always
+    depends_on:
+      - api
+    networks:
+      - nlp_proxy_network
+    expose:
+      - "80"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+        labels: "service=frontend"
+
   # ── FastAPI web service (REST API) ──────────────────────────────────────
   # Serves REST endpoints for article queries, job management, metrics
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nlp-analyzer:latest
+    image: seraphim-systems/nlp-article-analyzer:latest
     container_name: nlp_api_prod
     restart: always
     depends_on:
@@ -156,7 +178,7 @@ services:
     command: api
     expose:
       - "80"
-    # Note: No direct port mapping! Access via proxy network only.
+    # Note: No direct port mapping! Access via frontend or proxy network.
     deploy:
       resources:
         limits:
@@ -166,11 +188,6 @@ services:
           cpus: '1'
           memory: 1G
       replicas: 1
-      # Optional: load balancing endpoint
-      labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.nlp-api.rule=Host(`api.example.com`)"
-        - "traefik.http.services.nlp-api.loadbalancer.server.port=80"
     logging:
       driver: "json-file"
       options:
