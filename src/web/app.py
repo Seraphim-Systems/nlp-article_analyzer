@@ -251,7 +251,7 @@ async def get_stats() -> dict:
         "ner":        client[settings.NER_DB_NAME][settings.NER_COLLECTION].count_documents({}),
         "quarantine": client[settings.RAW_DB_NAME].get_collection("quarantine").count_documents({}),
         "raw_by_rank": raw_by_rank,
-        "jobs_tracked": len(_jobs),
+        "jobs_tracked": client[settings.MODELS_DB_NAME]["jobs"].count_documents({}),
     }
 
 
