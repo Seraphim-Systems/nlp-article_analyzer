@@ -10,7 +10,7 @@ services:
   # ── MongoDB database ────────────────────────────────────────────────────
   mongodb:
     image: mongo:7.0
-    container_name: nlp_mongodb_prod
+    container_name: nlp_mongodb
     restart: always
     networks:
       - proxy
@@ -45,7 +45,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nlp-analyzer:latest
-    container_name: nlp_jobs_prod
+    container_name: nlp_jobs
     restart: always
     depends_on:
       mongodb:
@@ -62,7 +62,7 @@ services:
       NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
-      KAGGLE_ENABLED: "true"
+      KAGGLE_ENABLED: "false"
       SKIP_BOOTSTRAP: "true"
     command: wait
     volumes:
@@ -88,7 +88,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.prod
     image: nlp-frontend:latest
-    container_name: nlp_frontend_prod
+    container_name: nlp_frontend
     restart: always
     depends_on:
       - api
@@ -109,7 +109,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nlp-analyzer:latest
-    container_name: nlp_api_prod
+    container_name: nlp_api
     restart: always
     depends_on:
       mongodb:
@@ -150,7 +150,7 @@ services:
   # ── Prometheus metrics collector ─────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.51.0
-    container_name: nlp_prometheus_prod
+    container_name: nlp_prometheus
     restart: always
     depends_on:
       - api
@@ -185,7 +185,7 @@ services:
   # ── Grafana dashboard ─────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.2
-    container_name: nlp_grafana_prod
+    container_name: nlp_grafana
     restart: always
     depends_on:
       - prometheus
