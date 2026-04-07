@@ -80,6 +80,7 @@ class JobStatusResponse(BaseModel):
     started_at: str
     finished_at: str | None
     result: dict | None
+    logs: list[str] = []
 
 
 class ArticleResponse(BaseModel):
@@ -261,28 +262,46 @@ async def get_stats() -> dict:
 # ──────────────────────────────────────────────────────────────
 
 
+def _append_log(job_id: str, message: str) -> None:
+    with _jobs_lock:
+        if job_id in _jobs:
+            _jobs[job_id]["logs"].append(message)
+
+
 def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
     """Execute a job in a background thread and record result."""
     import time as _time
     with _jobs_lock:
+        if _jobs[job_id].get("cancel_requested"):
+            return
         _jobs[job_id]["status"] = "running"
     _start = _time.perf_counter()
     _status = "failed"
+
+    def _log(msg: str) -> None:
+        _append_log(job_id, msg)
+
     try:
         from jobs import run_job
-        result = run_job(job_name, dry_run=dry_run)
-        _status = "success" if result.get("status") == "success" else "failed"
+        result = run_job(job_name, dry_run=dry_run, log_fn=_log)
         with _jobs_lock:
+            if _jobs[job_id].get("cancel_requested"):
+                _status = "cancelled"
+            else:
+                _status = "success" if result.get("status") == "success" else "failed"
             _jobs[job_id]["status"] = _status
             _jobs[job_id]["result"] = result
     except Exception as e:
         with _jobs_lock:
-            _jobs[job_id]["status"] = "failed"
-            _jobs[job_id]["result"] = {"error": str(e)}
+            if not _jobs[job_id].get("cancel_requested"):
+                _jobs[job_id]["status"] = "failed"
+                _jobs[job_id]["result"] = {"error": str(e)}
+            _status = _jobs[job_id]["status"]
     finally:
         _duration = _time.perf_counter() - _start
         with _jobs_lock:
-            _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+            if not _jobs[job_id].get("finished_at"):
+                _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
         try:
             from web.prometheus_metrics import JOB_DURATION_SECONDS, JOB_RUNS_TOTAL
             JOB_DURATION_SECONDS.labels(job_name=job_name, status=_status).observe(_duration)
@@ -307,6 +326,7 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
             "started_at":  datetime.utcnow().isoformat() + "Z",
             "finished_at": None,
             "result":      None,
+            "logs":        [],
         }
 
     t = threading.Thread(
@@ -342,6 +362,21 @@ async def list_jobs() -> dict:
         snapshot = [dict(j) for j in _jobs.values()]
     jobs = sorted(snapshot, key=lambda j: j["started_at"], reverse=True)
     return {"jobs": jobs[:50]}
+
+
+@app.post("/jobs/{job_id}/cancel", tags=["jobs"])
+async def cancel_job(job_id: str) -> dict:
+    """Cancel a queued or running job."""
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if not job:
+            raise HTTPException(404, f"Job {job_id} not found")
+        if job["status"] not in ("queued", "running"):
+            raise HTTPException(400, f"Job {job_id} is already {job['status']}")
+        _jobs[job_id]["status"] = "cancelled"
+        _jobs[job_id]["cancel_requested"] = True
+        _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+    return {"job_id": job_id, "status": "cancelled"}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -411,7 +446,7 @@ async def get_ner_article(url_b64: str) -> dict:
 
 @app.get("/compare/tfidf", tags=["compare"])
 async def tfidf_comparison(
-    sample_size: int = Query(200, ge=10, le=1000),
+    sample_size: int = Query(200, ge=10, le=5000),
 ) -> dict:
     """
     Compute TF-IDF comparison: clean preprocessed text vs NER-enhanced text.
@@ -427,13 +462,15 @@ async def tfidf_comparison(
 
     from database.repositories import get_ner_collection
 
+    from preprocessing.ner_text_builder import build_ner_preprocessed_text
+
     articles = list(
         get_ner_collection().find(
             {
                 "preprocessed_text": {"$exists": True, "$ne": ""},
                 "entities": {"$exists": True},
             },
-            {"preprocessed_text": 1, "body": 1, "entities": 1, "url": 1, "title": 1},
+            {"preprocessed_text": 1, "ner_preprocessed_text": 1, "body": 1, "entities": 1},
         ).limit(sample_size)
     )
 
@@ -450,27 +487,21 @@ async def tfidf_comparison(
     for a in articles:
         clean_texts.append(a.get("preprocessed_text") or "")
 
-        body = a.get("body") or ""
-        entities = sorted(
-            a.get("entities", []),
-            key=lambda e: e.get("start", 0),
-            reverse=True,  # process from end to preserve offsets
-        )
-        ner_body = body
-        for ent in entities:
-            label = ent.get("label", "MISC")
-            text  = ent.get("text", "").replace(" ", "_")
-            s, e  = ent.get("start", 0), ent.get("end", 0)
-            if 0 <= s < e <= len(ner_body):
-                ner_body = ner_body[:s] + f"{label}_{text}" + ner_body[e:]
-            entity_dist[label] += 1
+        ner_pre = a.get("ner_preprocessed_text")
+        if not ner_pre:
+            ner_pre = build_ner_preprocessed_text(
+                a.get("body") or "",
+                a.get("entities", []),
+            )
+        ner_texts.append(ner_pre)
 
-        ner_texts.append(ner_body.lower())
+        for ent in a.get("entities", []):
+            entity_dist[ent.get("label", "MISC")] += 1
 
     # Fit TF-IDF vectorizers
     top_n = 25
-    vect_clean = TfidfVectorizer(max_features=300, ngram_range=(1, 2), min_df=3, sublinear_tf=True)
-    vect_ner   = TfidfVectorizer(max_features=300, ngram_range=(1, 2), min_df=3, sublinear_tf=True)
+    vect_clean = TfidfVectorizer(ngram_range=(1, 2), min_df=3, sublinear_tf=True)
+    vect_ner   = TfidfVectorizer(ngram_range=(1, 2), min_df=3, sublinear_tf=True, lowercase=False)
 
     try:
         mat_clean = vect_clean.fit_transform(clean_texts)
@@ -487,7 +518,6 @@ async def tfidf_comparison(
     top_clean_idx = mean_clean.argsort()[-top_n:][::-1]
     top_ner_idx   = mean_ner.argsort()[-top_n:][::-1]
 
-    # Identify NER-specific terms (contain underscore type prefix)
     ner_labels = {"PER_", "ORG_", "LOC_", "MISC_"}
 
     def is_ner_term(t: str) -> bool:
@@ -508,6 +538,100 @@ async def tfidf_comparison(
         "ner_vocab_size":   int(mat_ner.shape[1]),
         "ner_token_ratio":  round(
             sum(1 for t in terms_ner if is_ner_term(t)) / max(len(terms_ner), 1), 3
+        ),
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# Separability Analysis
+# ──────────────────────────────────────────────────────────────
+
+
+@app.get("/compare/separability", tags=["compare"])
+async def separability_analysis(
+    sample_size: int = Query(200, ge=10, le=1000),
+) -> dict:
+    """
+    Compute document separability metrics for clean vs NER-enhanced TF-IDF.
+
+    Mean pairwise cosine similarity across document pairs — lower values indicate
+    more discriminative/separable document vectors, which should benefit classification.
+    """
+    import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity as _cos_sim
+
+    from database.repositories import get_ner_collection
+    from preprocessing.ner_text_builder import build_ner_preprocessed_text
+
+    articles = list(
+        get_ner_collection().find(
+            {
+                "preprocessed_text": {"$exists": True, "$ne": ""},
+                "entities": {"$exists": True},
+            },
+            {"preprocessed_text": 1, "ner_preprocessed_text": 1, "body": 1, "entities": 1},
+        ).limit(sample_size)
+    )
+
+    if not articles:
+        raise HTTPException(503, "No NER-enriched articles available yet.")
+
+    clean_texts = [a.get("preprocessed_text") or "" for a in articles]
+    ner_texts = [
+        a.get("ner_preprocessed_text")
+        or build_ner_preprocessed_text(a.get("body") or "", a.get("entities", []))
+        for a in articles
+    ]
+
+    vect_clean = TfidfVectorizer(ngram_range=(1, 2), min_df=3, sublinear_tf=True)
+    vect_ner   = TfidfVectorizer(ngram_range=(1, 2), min_df=3, sublinear_tf=True, lowercase=False)
+
+    try:
+        mat_clean = vect_clean.fit_transform(clean_texts)
+        mat_ner   = vect_ner.fit_transform(ner_texts)
+    except ValueError as e:
+        raise HTTPException(500, f"TF-IDF computation failed: {e}")
+
+    def _pairwise_stats(mat) -> tuple[float, float]:
+        n = mat.shape[0]
+        if n < 2:
+            return 0.0, 0.0
+        sims = _cos_sim(mat)
+        upper = sims[np.triu_indices(n, k=1)]
+        return float(upper.mean()), float(upper.std())
+
+    clean_mean, clean_std = _pairwise_stats(mat_clean)
+    ner_mean,   ner_std   = _pairwise_stats(mat_ner)
+
+    mean_c = np.asarray(mat_clean.mean(axis=0)).flatten()
+    mean_n = np.asarray(mat_ner.mean(axis=0)).flatten()
+    top_c  = set(vect_clean.get_feature_names_out()[mean_c.argsort()[-25:][::-1]])
+    top_n  = set(vect_ner.get_feature_names_out()[mean_n.argsort()[-25:][::-1]])
+    top_c_l = {t.lower() for t in top_c}
+    top_n_l = {t.lower() for t in top_n}
+    intersection = len(top_c_l & top_n_l)
+    union        = len(top_c_l | top_n_l)
+
+    ner_prefixes = {"PER_", "ORG_", "LOC_", "MISC_"}
+    ner_specific = sum(1 for t in top_n if any(t.startswith(p) for p in ner_prefixes))
+
+    improvement = (clean_mean - ner_mean) / max(clean_mean, 0.001)
+
+    return {
+        "sample_size":          len(articles),
+        "clean_avg_similarity": round(clean_mean, 4),
+        "ner_avg_similarity":   round(ner_mean,   4),
+        "clean_std":            round(clean_std,  4),
+        "ner_std":              round(ner_std,    4),
+        "top25_jaccard":        round(intersection / union if union > 0 else 0.0, 3),
+        "top25_overlap_count":  intersection,
+        "ner_specific_terms":   ner_specific,
+        "improvement_pct":      round(improvement * 100, 1),
+        "verdict":              (
+            "improved"     if improvement >  0.03 else
+            "degraded"     if improvement < -0.03 else
+            "inconclusive"
         ),
     }
 

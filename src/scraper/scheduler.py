@@ -36,7 +36,11 @@ def _collect_all_scrapers():
     return scrapers
 
 
-def run_scrape_job(for_date: date | None = None, run_cleaning: bool | None = None) -> None:
+def run_scrape_job(
+    for_date: date | None = None,
+    run_cleaning: bool | None = None,
+    log_fn=None,
+) -> None:
     """
     Execute one full scrape cycle.
 
@@ -44,21 +48,30 @@ def run_scrape_job(for_date: date | None = None, run_cleaning: bool | None = Non
     ----------
     for_date : date, optional
         Override the target date (useful for back-filling). Defaults to today.
+    log_fn : callable, optional
+        Called with a progress string after each feed completes.
     """
+    log = log_fn or (lambda _: None)
     target = for_date or date.today()
     logger.info("=== Scrape job started for %s ===", target)
 
     scrapers = _collect_all_scrapers()
     all_articles: list[dict] = []
+    log(f"Found {len(scrapers)} feeds to scrape")
 
     for scraper in scrapers:
+        log(f"Fetching: {scraper.name}...")
         try:
             articles = scraper.scrape_today(target)
             all_articles.extend(articles)
+            log(f"  {scraper.name}: {len(articles)} articles collected")
         except Exception:
+            log(f"  {scraper.name}: failed")
             logger.exception("Scraper '%s' raised an unhandled exception.", scraper.name)
 
+    log(f"Inserting {len(all_articles)} articles into raw_articles...")
     inserted = insert_raw_articles(all_articles)
+    log(f"Inserted {inserted} new articles")
     logger.info(
         "=== Scrape job finished: %d articles collected, %d newly inserted ===",
         len(all_articles),
@@ -67,9 +80,11 @@ def run_scrape_job(for_date: date | None = None, run_cleaning: bool | None = Non
 
     should_run_cleaning = settings.RUN_CLEAN_AFTER_SCRAPE if run_cleaning is None else run_cleaning
     if should_run_cleaning:
+        log("Running cleaning pipeline after scrape...")
         from cleaning.cleaner import run_cleaning_pipeline
 
         summary = run_cleaning_pipeline()
+        log(f"Cleaning done: promoted={summary.get('promoted',0)}, discarded={summary.get('discarded',0)}")
         logger.info("=== Cleaning finished after scrape: %s ===", summary)
 
 

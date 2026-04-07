@@ -13,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def run(dry_run: bool = False) -> dict[str, Any]:
+def run(dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the cleaning job.
 
@@ -38,6 +38,7 @@ def run(dry_run: bool = False) -> dict[str, Any]:
         - errors: list of error messages
         - duration_seconds: execution time
     """
+    log = log_fn or (lambda _: None)
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",
@@ -48,32 +49,38 @@ def run(dry_run: bool = False) -> dict[str, Any]:
     }
 
     try:
-        # Initialize databases on first run
         from database.init_db import init_databases
 
         init_databases()
 
         logger.info("=== Clean job started ===")
+        log("Ranking raw articles...")
 
         if dry_run:
+            log("Dry run — no changes committed")
             logger.info("DRY RUN: Cleaning pipeline would run")
         else:
             from cleaning.cleaner import run_cleaning_pipeline
 
+            log("Running cleaning pipeline: rank, recover, promote...")
             summary = run_cleaning_pipeline()
             result["promoted"] = summary.get("promoted", 0)
             result["discarded"] = summary.get("discarded", 0)
+            log(f"Promoted {result['promoted']:,} articles to clean collection")
+            log(f"Discarded {result['discarded']:,} rank-2 articles")
             logger.info("Clean job completed: %s", summary)
 
         result["status"] = "success"
 
     except Exception as e:
         logger.exception("Clean job failed")
+        log(f"Error: {e}")
         result["status"] = "failed"
         result["errors"].append(str(e))
 
     finally:
         result["duration_seconds"] = time.time() - start_time
+        log(f"Finished in {result['duration_seconds']:.1f}s — status: {result['status']}")
         logger.info(
             "=== Clean job finished (status=%s, duration=%.2fs) ===",
             result["status"],

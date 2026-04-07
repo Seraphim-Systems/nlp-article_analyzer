@@ -14,7 +14,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
+def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute a scrape job.
 
@@ -38,6 +38,7 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
         - errors: list of error messages
         - duration_seconds: execution time
     """
+    log = log_fn or (lambda _: None)
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",
@@ -48,32 +49,36 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
     }
 
     try:
-        # Initialize databases on first run
         from database.init_db import init_databases
 
         init_databases()
 
         target = for_date or date.today()
         logger.info("=== Scrape job started for %s ===", target)
+        log(f"Initializing for date: {target}")
 
-        # Import scraper logic
         from scraper.scheduler import run_scrape_job
 
         if dry_run:
+            log("Dry run — skipping feed collection")
             logger.info("DRY RUN: Would scrape for date %s", target)
         else:
-            run_scrape_job(for_date=target)
+            log("Fetching RSS feeds and collecting articles...")
+            run_scrape_job(for_date=target, log_fn=log)
+            log("Feed collection complete")
             logger.info("Scrape job completed for %s", target)
 
         result["status"] = "success"
 
     except Exception as e:
         logger.exception("Scrape job failed")
+        log(f"Error: {e}")
         result["status"] = "failed"
         result["errors"].append(str(e))
 
     finally:
         result["duration_seconds"] = time.time() - start_time
+        log(f"Finished in {result['duration_seconds']:.1f}s — status: {result['status']}")
         logger.info(
             "=== Scrape job finished (status=%s, duration=%.2fs) ===",
             result["status"],
