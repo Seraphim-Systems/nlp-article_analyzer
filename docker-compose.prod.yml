@@ -1,75 +1,29 @@
 # ──────────────────────────────────────────────────────────────────────────
 # PRODUCTION DEPLOYMENT SETUP
 # ──────────────────────────────────────────────────────────────────────────
-#
-# This compose stack is optimized for production deployment:
-# - MongoDB with persistent volumes and backups
-# - All services connect to external proxy network
-# - Resource limits applied to all containers
-# - Logging to central aggregation (optional)
-# - Health checks for service recovery
-# - No host volume mounts (secure)
-#
-# Prerequisites:
-#   - External Docker network must exist:
-#     docker network create --driver bridge nlp_proxy_network
-#
-# Usage:
-#   docker-compose -f docker-compose.prod.yml up -d
-#   docker-compose -f docker-compose.prod.yml logs -f api
-#   docker-compose -f docker-compose.prod.yml down
-#
-# For local development, use docker-compose.yml instead.
-
-volumes:
-  hf_cache_prod:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/hf_cache
-  mongo_data_prod:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/mongo
-  prometheus_data_prod:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/prometheus
-  grafana_data_prod:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PWD}/data/grafana
+# Optimized for production:
+# - Data stored in ./data/
+# - Services on the 'proxy' network
+# - Resource limits and health checks
 
 services:
-  # ── MongoDB database (production instance) ──────────────────────────────
+  # ── MongoDB database ────────────────────────────────────────────────────
   mongodb:
     image: mongo:7.0
     container_name: nlp_mongodb_prod
     restart: always
-    # Connect to external proxy network
     networks:
       - proxy
     volumes:
-      - mongo_data_prod:/data/db
+      - ./data/mongo:/data/db
     environment:
       MONGO_INITDB_DATABASE: admin
-      # Optional: Enable auth in production
-      # MONGO_INITDB_ROOT_USERNAME: admin
-      # MONGO_INITDB_ROOT_PASSWORD: <secure-password>
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -86,12 +40,11 @@ services:
         labels: "service=mongodb"
 
   # ── Job scheduler / pipeline runner ──────────────────────────────────────
-  # Runs scheduled jobs for scraping, cleaning, classification, evaluation
   jobs:
     build:
       context: .
       dockerfile: Dockerfile
-    image: seraphim-systems/nlp-article-analyzer:latest
+    image: nlp-analyzer:latest
     container_name: nlp_jobs_prod
     restart: always
     depends_on:
@@ -109,14 +62,11 @@ services:
       NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
-      # Kaggle bootstrap (set in .env if needed)
       KAGGLE_ENABLED: "true"
       SKIP_BOOTSTRAP: "true"
-    # Entrypoint handles init + bootstrap, then waits for scheduled job execution
-    # (orchestrated externally via cron/K8s CronJob or manual CLI)
     command: wait
     volumes:
-      - hf_cache_prod:/root/.cache/huggingface
+      - ./data/hf_cache:/root/.cache/huggingface
     deploy:
       resources:
         limits:
@@ -133,7 +83,6 @@ services:
         labels: "service=jobs"
 
   # ── Frontend dashboard (React SPA) ──────────────────────────────────────
-  # Serves the static assets and proxies /api to the backend service
   frontend:
     build:
       context: ./frontend
@@ -155,12 +104,11 @@ services:
         labels: "service=frontend"
 
   # ── FastAPI web service (REST API) ──────────────────────────────────────
-  # Serves REST endpoints for article queries, job management, metrics
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: seraphim-systems/nlp-article-analyzer:latest
+    image: nlp-analyzer:latest
     container_name: nlp_api_prod
     restart: always
     depends_on:
@@ -178,16 +126,11 @@ services:
       NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
-      # Kaggle bootstrap (disabled in production after initial setup)
       KAGGLE_ENABLED: "false"
       SKIP_BOOTSTRAP: "true"
-      # Optional: APM (Application Performance Monitoring)
-      # SENTRY_DSN: https://...
-    # Entrypoint handles init, CMD specifies 'api' service
     command: api
     expose:
       - "80"
-    # Note: No direct port mapping! Access via frontend or proxy network.
     deploy:
       resources:
         limits:
@@ -218,7 +161,7 @@ services:
     volumes:
       - ./monitoring/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus.alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus_data_prod:/prometheus
+      - ./data/prometheus:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -256,7 +199,7 @@ services:
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/nlp_pipeline.json
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana_data_prod:/var/lib/grafana
+      - ./data/grafana:/var/lib/grafana
     deploy:
       resources:
         limits:
@@ -271,21 +214,6 @@ services:
         max-size: "20m"
         max-file: "3"
         labels: "service=grafana"
-
-# ──────────────────────────────────────────────────────────────────────────
-# EXTERNAL NETWORK
-# ──────────────────────────────────────────────────────────────────────────
-# 
-# Connects to an external Docker network (e.g., managed by Traefik/nginx proxy).
-# This allows the proxy to route requests to the api service without exposing
-# container ports directly.
-#
-# Create the network:
-#   docker network create --driver bridge nlp_proxy_network
-#
-# Or if using Traefik:
-#   docker network create --driver bridge traefik_network
-#   # Then update network name below
 
 networks:
   proxy:
