@@ -2,11 +2,6 @@ name: Deploy to Production
 
 on:
   workflow_dispatch:
-    inputs:
-      reason:
-        description: 'Reason for manual deploy'
-        required: false
-        default: 'Manual update'
 
 jobs:
   production-deploy:
