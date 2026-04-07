@@ -13,11 +13,6 @@ on:
         required: false
         type: string
         default: "production"
-      env_vars:
-        description: "Newline separated list of ENV_VAR=value"
-        required: false
-        type: string
-        default: ""
     secrets:
       HETZNER_IP:
         required: true
@@ -27,6 +22,8 @@ on:
         required: false
       HETZNER_KEY:
         required: true
+      env_vars:
+        required: false
 
 jobs:
   deploy:
@@ -58,7 +55,7 @@ jobs:
 
             # 3. Create .env file
             echo "--- Creating .env file ---"
-            printf "%b" "${{ inputs.env_vars }}" > .env
+            printf "%b" "${{ secrets.env_vars }}" > .env
             echo "Successfully created .env"
 
             # 4. Identify Compose File

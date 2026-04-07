@@ -9,9 +9,13 @@ jobs:
     with:
       deploy_path: "~/nlp-project"
       environment: "production"
+    secrets:
+      HETZNER_IP: ${{ secrets.HETZNER_IP }}
+      HETZNER_USER: ${{ secrets.HETZNER_USER }}
+      HETZNER_KEY: ${{ secrets.HETZNER_KEY }}
+      HETZNER_PORT: ${{ secrets.HETZNER_PORT }}
       env_vars: |
         GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         KAGGLE_USERNAME=${{ secrets.KAGGLE_USERNAME }}
         KAGGLE_KEY=${{ secrets.KAGGLE_KEY }}
         MONGO_ROOT_PASSWORD=${{ secrets.MONGO_ROOT_PASSWORD }}
-    secrets: inherit
