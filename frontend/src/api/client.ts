@@ -84,10 +84,41 @@ export interface TFIDFComparison {
 export interface Job {
   job_id: string
   job_name: string
-  status: 'queued' | 'running' | 'success' | 'failed'
+  status: 'queued' | 'running' | 'success' | 'failed' | 'cancelled'
   started_at: string
   finished_at?: string
   result?: Record<string, unknown>
+  logs?: string[]
+}
+
+export interface EntityMetrics {
+  precision: number
+  recall: number
+  f1: number
+  support: number
+}
+
+export interface SeparabilityData {
+  sample_size: number
+  clean_avg_similarity: number
+  ner_avg_similarity: number
+  clean_std: number
+  ner_std: number
+  top25_jaccard: number
+  top25_overlap_count: number
+  ner_specific_terms: number
+  improvement_pct: number
+  verdict: 'improved' | 'inconclusive' | 'degraded'
+}
+
+export interface EvalMetrics {
+  model_version: string | null
+  last_updated: string | null
+  precision: number | null
+  recall: number | null
+  f1: number | null
+  per_entity: Record<string, EntityMetrics> | null
+  sample_size: number | null
 }
 
 // ── API calls ──────────────────────────────────────────────────
@@ -113,9 +144,14 @@ export const api = {
   tfidf: (sampleSize = 200) =>
     get<TFIDFComparison>(`/compare/tfidf?sample_size=${sampleSize}`),
 
+  separability: (sampleSize = 200) =>
+    get<SeparabilityData>(`/compare/separability?sample_size=${sampleSize}`),
+
   triggerJob: (job_name: string, dry_run = false) =>
     post<{ job_id: string; status: string }>('/jobs/trigger', { job_name, dry_run }),
 
-  jobs:    () => get<{ jobs: Job[] }>('/jobs'),
-  jobById: (id: string) => get<Job>(`/jobs/${id}`),
+  jobs:      () => get<{ jobs: Job[] }>('/jobs'),
+  jobById:   (id: string) => get<Job>(`/jobs/${id}`),
+  cancelJob: (id: string) => post<{ job_id: string; status: string }>(`/jobs/${id}/cancel`, {}),
+  metrics:   () => get<EvalMetrics>('/metrics'),
 }

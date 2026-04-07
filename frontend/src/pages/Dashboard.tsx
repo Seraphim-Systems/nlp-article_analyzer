@@ -1,6 +1,6 @@
 import { useQuery } from '../hooks/useQuery'
-import { api } from '../api/client'
-import { Database, Layers, Cpu, AlertTriangle, CheckCircle, Clock } from 'lucide-react'
+import { api, EntityMetrics } from '../api/client'
+import { Database, Layers, Cpu, AlertTriangle, CheckCircle, Clock, Activity } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from 'recharts'
@@ -71,6 +71,115 @@ function RankDistribution({ rankData }: { rankData: Record<string, number> }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+const NER_LABEL_COLOR: Record<string, string> = {
+  PER: 'var(--ner-per)', ORG: 'var(--ner-org)', LOC: 'var(--ner-loc)', MISC: 'var(--ner-misc)',
+}
+const ENTITY_FULL: Record<string, string> = {
+  PER: 'Person', ORG: 'Organisation', LOC: 'Location', MISC: 'Miscellaneous',
+}
+
+function MetricBar({ value, color }: { value: number; color: string }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ flex: 1, height: 5, background: 'var(--bg-elevated)', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ width: `${value * 100}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.8s ease' }} />
+      </div>
+      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color, minWidth: 36, textAlign: 'right' }}>
+        {(value * 100).toFixed(1)}
+      </span>
+    </div>
+  )
+}
+
+function ModelPerformance() {
+  const { data, loading, error } = useQuery(() => api.metrics(), [], { interval: 15_000 })
+
+  const hasData = data?.f1 != null
+
+  return (
+    <div className="card" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
+      <div className="card-title"><Activity size={14} /> Model Performance — BERT NER</div>
+
+      {loading && <div className="loading" style={{ padding: '20px 0' }}><div className="spinner" /></div>}
+      {error && <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Could not load metrics.</p>}
+
+      {!loading && !hasData && (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          No evaluation run yet — trigger the <strong style={{ color: 'var(--text-secondary)' }}>evaluate</strong> job in Job Runner to compute metrics.
+        </p>
+      )}
+
+      {!loading && hasData && data && (
+        <>
+          {/* Overall P / R / F1 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+            {[
+              { label: 'Precision', value: data.precision!, color: 'var(--accent-hi)' },
+              { label: 'Recall',    value: data.recall!,    color: 'var(--ner-loc)' },
+              { label: 'F1 Score',  value: data.f1!,        color: 'var(--gold)' },
+            ].map(m => (
+              <div key={m.label} style={{ background: 'var(--bg-elevated)', borderRadius: 'var(--radius)', padding: '14px 16px', border: '1px solid var(--border-mid)' }}>
+                <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>
+                  {m.label}
+                </div>
+                <div style={{ fontSize: '1.6rem', fontFamily: 'var(--font-mono)', color: m.color, lineHeight: 1, letterSpacing: '-0.02em', marginBottom: 8 }}>
+                  {(m.value * 100).toFixed(1)}<span style={{ fontSize: '0.9rem', opacity: 0.6 }}>%</span>
+                </div>
+                <div style={{ height: 4, background: 'var(--bg-base)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: `${m.value * 100}%`, height: '100%', background: m.color, borderRadius: 2, transition: 'width 0.8s ease' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Per-entity breakdown */}
+          {data.per_entity && (
+            <>
+              <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>
+                Per-entity breakdown
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', alignItems: 'center', gap: '6px 12px' }}>
+                {/* Header */}
+                {['', 'Precision', 'Recall', 'F1', 'Support'].map(h => (
+                  <div key={h} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', paddingBottom: 4, borderBottom: '1px solid var(--border)' }}>
+                    {h}
+                  </div>
+                ))}
+                {/* Rows */}
+                {(['PER', 'ORG', 'LOC', 'MISC'] as const).map(label => {
+                  const m: EntityMetrics | undefined = data.per_entity?.[label]
+                  if (!m) return null
+                  const color = NER_LABEL_COLOR[label]
+                  return [
+                    <div key={`${label}-name`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className={`badge badge-${label}`} style={{ fontSize: 9 }}>{label}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ENTITY_FULL[label]}</span>
+                    </div>,
+                    <MetricBar key={`${label}-p`} value={m.precision} color={color} />,
+                    <MetricBar key={`${label}-r`} value={m.recall}    color={color} />,
+                    <MetricBar key={`${label}-f`} value={m.f1}        color={color} />,
+                    <span key={`${label}-s`} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', textAlign: 'right' }}>
+                      {m.support}
+                    </span>,
+                  ]
+                })}
+              </div>
+            </>
+          )}
+
+          <div style={{ marginTop: 14, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', display: 'flex', gap: 20 }}>
+            <span><Clock size={10} style={{ display: 'inline', marginRight: 4 }} />
+              Last run: {data.last_updated ? new Date(data.last_updated).toLocaleString() : '—'}
+            </span>
+            {data.sample_size && <span>Sample: {data.sample_size.toLocaleString()} articles</span>}
+            {data.model_version && <span>Model: {data.model_version}</span>}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -169,7 +278,7 @@ export default function Dashboard() {
         </div>
 
         {/* ── About / thesis context ── */}
-        <div className="card">
+        <div className="card" style={{ gridColumn: '2 / 3' }}>
           <div className="card-title" style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--text-primary)' }}>
             Research Context
           </div>
@@ -194,6 +303,9 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Model performance ── */}
+      <ModelPerformance />
     </div>
   )
 }

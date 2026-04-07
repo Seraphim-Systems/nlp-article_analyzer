@@ -16,8 +16,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_MODEL_NAME = "dslim/bert-base-NER"
-_MAX_TOKENS = 512
+_MODEL_NAME    = "dslim/bert-base-NER"
+_CHUNK_WORDS   = 400   # well under BERT's 512-subtoken limit after wordpiece splitting
+_OVERLAP_WORDS = 40    # overlap so entities spanning a chunk boundary aren't missed
 _pipeline = None
 _device_label: str = "cpu"
 
@@ -59,11 +60,66 @@ def get_device_label() -> str:
     return _device_label
 
 
+def _char_offset_of_word(words: list[str], word_idx: int) -> int:
+    """Return the character position where words[word_idx] starts in ' '.join(words)."""
+    return sum(len(w) + 1 for w in words[:word_idx])
+
+
+def _extract_chunked(normalized: str, nlp) -> list[dict[str, Any]]:
+    """
+    Run NER over arbitrarily long text by splitting into overlapping word-chunks.
+
+    Each chunk is at most _CHUNK_WORDS words. Adjacent chunks overlap by
+    _OVERLAP_WORDS words so entities that fall on a boundary are not missed.
+    Entity positions are adjusted to be absolute in `normalized`.
+    Duplicate detections from the overlap region are deduplicated.
+    """
+    words = normalized.split()
+    if not words:
+        return []
+
+    if len(words) <= _CHUNK_WORDS:
+        raw = nlp(normalized)
+        return [
+            {"text": e["word"], "label": e["entity_group"], "start": e["start"], "end": e["end"]}
+            for e in raw
+        ]
+
+    seen: set[tuple[int, int, str]] = set()
+    entities: list[dict[str, Any]] = []
+
+    start_w = 0
+    while start_w < len(words):
+        end_w      = min(start_w + _CHUNK_WORDS, len(words))
+        chunk_text = " ".join(words[start_w:end_w])
+        offset     = _char_offset_of_word(words, start_w)
+
+        for e in nlp(chunk_text):
+            abs_start = e["start"] + offset
+            abs_end   = e["end"]   + offset
+            key = (abs_start, abs_end, e["entity_group"])
+            if key not in seen:
+                seen.add(key)
+                entities.append({
+                    "text":  e["word"],
+                    "label": e["entity_group"],
+                    "start": abs_start,
+                    "end":   abs_end,
+                })
+
+        if end_w == len(words):
+            break
+        start_w += _CHUNK_WORDS - _OVERLAP_WORDS
+
+    return entities
+
+
 def extract_entities(text: str) -> list[dict[str, Any]]:
     """
     Extract named entities from a text string.
 
-    Truncates to _MAX_TOKENS words before inference to respect BERT's limit.
+    Long texts are processed in overlapping chunks so no part of the article
+    is silently dropped due to BERT's 512-subtoken limit.
 
     Parameters
     ----------
@@ -77,31 +133,17 @@ def extract_entities(text: str) -> list[dict[str, Any]]:
     """
     if not text or not text.strip():
         return []
-
-    words = text.split()
-    if len(words) > _MAX_TOKENS:
-        text = " ".join(words[:_MAX_TOKENS])
-
-    nlp = _get_pipeline()
-    raw_entities = nlp(text)
-
-    return [
-        {
-            "text":  ent["word"],
-            "label": ent["entity_group"],
-            "start": ent["start"],
-            "end":   ent["end"],
-        }
-        for ent in raw_entities
-    ]
+    normalized = " ".join(text.split())
+    return _extract_chunked(normalized, _get_pipeline())
 
 
 def batch_extract(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Run NER extraction on a list of article dicts using BERT batching.
+    Run NER extraction on a list of article dicts.
 
     Each article must have a `body` field. Returns a new list of dicts
-    with an `entities` key added to each article.
+    with an `entities` key added. Long articles are processed in overlapping
+    chunks so entities are extracted from the full text.
 
     Parameters
     ----------
@@ -117,33 +159,11 @@ def batch_extract(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return []
 
     nlp = _get_pipeline()
-
-    # Truncate each body to _MAX_TOKENS words
-    texts = []
-    for article in articles:
-        body = article.get("body") or ""
-        words = body.split()
-        if len(words) > _MAX_TOKENS:
-            body = " ".join(words[:_MAX_TOKENS])
-        texts.append(body)
-
-    # Run BERT inference in one batched call
-    all_raw = nlp(texts, batch_size=len(texts))
-
     enriched = []
-    for article, raw_entities in zip(articles, all_raw):
-        # nlp() on a list returns a list of lists
-        if isinstance(raw_entities, dict):
-            raw_entities = [raw_entities]
-        entities = [
-            {
-                "text":  ent["word"],
-                "label": ent["entity_group"],
-                "start": ent["start"],
-                "end":   ent["end"],
-            }
-            for ent in raw_entities
-        ]
+    for article in articles:
+        body       = article.get("body") or ""
+        normalized = " ".join(body.split())
+        entities   = _extract_chunked(normalized, nlp)
         enriched.append({**article, "entities": entities})
 
     return enriched

@@ -80,13 +80,20 @@ def _print_collection_sizes() -> None:
     print("", flush=True)
 
 
-def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
+def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the NER classification job.
 
     Fetches all clean articles not yet in ner_articles, runs NER extraction
     via dslim/bert-base-NER, and upserts enriched documents into ner_articles.
     """
+    import re as _re
+    _log = log_fn or (lambda _: None)
+
+    def _print(tag: str, msg: str) -> None:
+        print(f"  {tag} {msg}", flush=True)
+        _log(_re.sub(r'\x1b\[[0-9;]*m', '', msg).strip())
+
     from utils.progress import make_pbar_simple
 
     start_time = time.time()
@@ -106,6 +113,7 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
             insert_ner_articles,
         )
         from features.ner_extractor import batch_extract, get_device_label
+        from preprocessing.ner_text_builder import build_ner_preprocessed_text
 
         init_databases()
 
@@ -143,7 +151,16 @@ def run(for_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
             enriched_chunk = batch_extract(chunk)
             _batch_duration = time.time() - _batch_start
 
+            for article in enriched_chunk:
+                article["ner_preprocessed_text"] = build_ner_preprocessed_text(
+                    article.get("body") or "",
+                    article.get("entities", []),
+                )
+
             pending.extend(enriched_chunk)
+
+            if (i // BATCH) % 8 == 0 and i > 0:
+                _log(f"Progress: {articles_done:,}/{len(articles):,} articles — {total_entities:,} entities found")
 
             batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
             total_entities += batch_entities

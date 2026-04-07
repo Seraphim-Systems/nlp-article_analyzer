@@ -29,7 +29,7 @@ SAMPLE_SIZE = 500
 MODEL_VERSION = "dslim/bert-base-NER"
 
 
-def run(dry_run: bool = False) -> dict[str, Any]:
+def run(dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the evaluation job.
 
@@ -47,6 +47,7 @@ def run(dry_run: bool = False) -> dict[str, Any]:
     dict with keys: status, model_version, metrics, errors, duration_seconds,
     sample_size.
     """
+    log = log_fn or (lambda _: None)
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",
@@ -64,27 +65,24 @@ def run(dry_run: bool = False) -> dict[str, Any]:
         from features.ner_extractor import batch_extract
 
         init_databases()
-
         logger.info("=== Evaluate job started ===")
+        log(f"Loading {SAMPLE_SIZE} reference articles from ner_articles...")
 
-        # ── 1. Load reference sample ──────────────────────────────────────────
         reference = load_ner_sample(n=SAMPLE_SIZE)
         if not reference:
-            logger.warning(
-                "No NER articles found — run the classify job first. "
-                "Evaluate job returning early."
-            )
+            log("No NER articles found — run the classify job first")
+            logger.warning("No NER articles found — run the classify job first.")
             result["status"] = "success"
             return result
 
+        log(f"Loaded {len(reference):,} reference articles")
         logger.info("Loaded %d reference articles for evaluation.", len(reference))
 
-        # ── 2. Re-run inference to produce predictions ─────────────────────────
-        logger.info("Running NER inference on sample…")
+        log("Running NER inference on sample to generate predictions...")
         predicted = batch_extract(reference)
+        log("Inference complete, computing metrics...")
         logger.info("Inference complete.")
 
-        # ── 3. Compute metrics ────────────────────────────────────────────────
         eval_results = compute_ner_metrics(predicted=predicted, reference=reference)
 
         metrics_dict: dict[str, Any] = {
@@ -102,44 +100,46 @@ def run(dry_run: bool = False) -> dict[str, Any]:
 
         overall = eval_results.get("overall")
         if overall:
+            log(f"Overall: P={overall.precision:.3f}  R={overall.recall:.3f}  F1={overall.f1:.3f}  (n={len(reference):,})")
             logger.info(
                 "Evaluation complete — overall P=%.4f  R=%.4f  F1=%.4f  (n=%d)",
-                overall.precision,
-                overall.recall,
-                overall.f1,
-                len(reference),
+                overall.precision, overall.recall, overall.f1, len(reference),
             )
 
         for label, r in eval_results.items():
+            if label != "overall":
+                log(f"  {label:<8} P={r.precision:.3f}  R={r.recall:.3f}  F1={r.f1:.3f}  n={r.support}")
             logger.info(
                 "  %-8s  P=%.4f  R=%.4f  F1=%.4f  support=%d",
                 label, r.precision, r.recall, r.f1, r.support,
             )
 
-        # ── 4. Persist run ────────────────────────────────────────────────────
         if not dry_run:
             from database.repositories import insert_model_run
 
             run_doc: dict[str, Any] = {
-                "model_version":    MODEL_VERSION,
-                "metrics":          metrics_dict,
-                "created_at":       datetime.now(timezone.utc).isoformat(),
-                "hyperparams":      {"model": MODEL_VERSION, "sample_size": len(reference)},
+                "model_version":     MODEL_VERSION,
+                "metrics":           metrics_dict,
+                "created_at":        datetime.now(timezone.utc).isoformat(),
+                "hyperparams":       {"model": MODEL_VERSION, "sample_size": len(reference)},
                 "training_set_size": len(reference),
             }
             inserted_id = insert_model_run(run_doc)
+            log("Results persisted to model_runs")
             logger.info("Eval run persisted to nlp_models.model_runs (id=%s)", inserted_id)
         else:
+            log("Dry run — metrics computed but not persisted")
             logger.info("DRY RUN: metrics computed but not persisted.")
-
 
     except Exception as e:
         logger.exception("Evaluate job failed")
+        log(f"Error: {e}")
         result["status"] = "failed"
         result["errors"].append(str(e))
 
     finally:
         result["duration_seconds"] = round(time.time() - start_time, 2)
+        log(f"Finished in {result['duration_seconds']:.1f}s — status: {result['status']}")
         logger.info(
             "=== Evaluate job finished (status=%s, duration=%.2fs) ===",
             result["status"],
