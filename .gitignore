@@ -210,3 +210,19 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 docs/superpowers/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Docker volumes / runtime data
+monitoring/grafana/data/
+monitoring/prometheus/data/
+
+# HuggingFace model cache
+hf_cache/
+
+# Environment variants
+.env.*
+!.env.example

@@ -100,7 +100,7 @@ class Settings:
 
     #: If true, run cleaning automatically right after each scrape cycle.
     RUN_CLEAN_AFTER_SCRAPE: bool = field(
-        default_factory=lambda: _env_bool("RUN_CLEAN_AFTER_SCRAPE", True)
+        default_factory=lambda: _env_bool("RUN_CLEAN_AFTER_SCRAPE", False)
     )
 
     #: If true, skip articles whose detected language is not English.
@@ -122,41 +122,49 @@ class Settings:
 
     RSS_FEEDS: list[dict[str, Any]] = field(
         default_factory=lambda: [
-            {
-                "name": "BBC News - World",
-                "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
-                "lang": "en",
-            },
-            {
-                "name": "BBC News - Politics",
-                "url": "http://feeds.bbci.co.uk/news/politics/rss.xml",
-                "lang": "en",
-            },
-            {
-                "name": "Reuters - World",
-                "url": "https://feeds.reuters.com/reuters/worldNews",
-                "lang": "en",
-            },
-            {
-                "name": "The Hindu",
-                "url": "https://www.thehindu.com/feeder/default.rss",
-                "lang": "en",
-            },
-            {
-                "name": "NDTV",
-                "url": "https://feeds.feedburner.com/ndtvnews-top-stories",
-                "lang": "en",
-            },
-            {
-                "name": "Al Jazeera English",
-                "url": "https://www.aljazeera.com/xml/rss/all.xml",
-                "lang": "en",
-            },
-            {
-                "name": "Times of India",
-                "url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-                "lang": "en",
-            },
+            # ── BBC ───────────────────────────────────────────────────────────
+            {"name": "BBC - World",       "url": "http://feeds.bbci.co.uk/news/world/rss.xml",                      "lang": "en"},
+            {"name": "BBC - UK",          "url": "http://feeds.bbci.co.uk/news/uk/rss.xml",                         "lang": "en"},
+            {"name": "BBC - Politics",    "url": "http://feeds.bbci.co.uk/news/politics/rss.xml",                   "lang": "en"},
+            {"name": "BBC - Business",    "url": "http://feeds.bbci.co.uk/news/business/rss.xml",                   "lang": "en"},
+            {"name": "BBC - Technology",  "url": "http://feeds.bbci.co.uk/news/technology/rss.xml",                 "lang": "en"},
+            {"name": "BBC - Science",     "url": "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",    "lang": "en"},
+            {"name": "BBC - Health",      "url": "http://feeds.bbci.co.uk/news/health/rss.xml",                     "lang": "en"},
+            # ── The Guardian ─────────────────────────────────────────────────
+            {"name": "Guardian - World",       "url": "https://www.theguardian.com/world/rss",       "lang": "en"},
+            {"name": "Guardian - UK",          "url": "https://www.theguardian.com/uk/rss",          "lang": "en"},
+            {"name": "Guardian - Politics",    "url": "https://www.theguardian.com/politics/rss",    "lang": "en"},
+            {"name": "Guardian - Business",    "url": "https://www.theguardian.com/business/rss",    "lang": "en"},
+            {"name": "Guardian - Technology",  "url": "https://www.theguardian.com/technology/rss",  "lang": "en"},
+            {"name": "Guardian - Science",     "url": "https://www.theguardian.com/science/rss",     "lang": "en"},
+            {"name": "Guardian - Environment", "url": "https://www.theguardian.com/environment/rss", "lang": "en"},
+            # ── NPR ───────────────────────────────────────────────────────────
+            {"name": "NPR - Top Stories", "url": "https://feeds.npr.org/1001/rss.xml", "lang": "en"},
+            {"name": "NPR - World",       "url": "https://feeds.npr.org/1004/rss.xml", "lang": "en"},
+            {"name": "NPR - Politics",    "url": "https://feeds.npr.org/1014/rss.xml", "lang": "en"},
+            # ── Sky News ─────────────────────────────────────────────────────
+            {"name": "Sky News - World",  "url": "https://feeds.skynews.com/feeds/rss/world.xml",      "lang": "en"},
+            {"name": "Sky News - UK",     "url": "https://feeds.skynews.com/feeds/rss/uk.xml",         "lang": "en"},
+            {"name": "Sky News - US",     "url": "https://feeds.skynews.com/feeds/rss/us.xml",         "lang": "en"},
+            {"name": "Sky News - Tech",   "url": "https://feeds.skynews.com/feeds/rss/technology.xml", "lang": "en"},
+            # ── International broadcasters ────────────────────────────────────
+            {"name": "Al Jazeera",  "url": "https://www.aljazeera.com/xml/rss/all.xml",          "lang": "en"},
+            {"name": "DW - World",  "url": "https://rss.dw.com/rdf/rss-en-world",                "lang": "en"},
+            {"name": "DW - Top",    "url": "https://rss.dw.com/rdf/rss-en-top",                  "lang": "en"},
+            {"name": "France 24",   "url": "https://www.france24.com/en/rss",                    "lang": "en"},
+            {"name": "Euronews",    "url": "https://www.euronews.com/rss?level=theme&name=news", "lang": "en"},
+            # ── South / Southeast Asia ────────────────────────────────────────
+            {"name": "The Hindu",        "url": "https://www.thehindu.com/feeder/default.rss",              "lang": "en"},
+            {"name": "Times of India",   "url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms","lang": "en"},
+            {"name": "Economic Times",   "url": "https://economictimes.indiatimes.com/rssfeedstopstories.cms","lang": "en"},
+            {"name": "CNA - World",      "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511", "lang": "en"},
+            {"name": "CNA - Asia",       "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6513", "lang": "en"},
+            # ── Technology ───────────────────────────────────────────────────
+            {"name": "Ars Technica",    "url": "https://feeds.arstechnica.com/arstechnica/index", "lang": "en"},
+            {"name": "The Verge",       "url": "https://www.theverge.com/rss/index.xml",          "lang": "en"},
+            {"name": "TechCrunch",      "url": "https://techcrunch.com/feed/",                    "lang": "en"},
+            # ── Science ──────────────────────────────────────────────────────
+            {"name": "Science Daily",   "url": "https://www.sciencedaily.com/rss/all.xml", "lang": "en"},
         ]
     )
 
