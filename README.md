@@ -108,7 +108,7 @@ docker compose exec jobs python scripts/run_job.py evaluate
 
 ## Native Python Environment (For MPS / CUDA)
 
-Docker on macOS cannot access Apple Metal as discussed in class as well. To use native GPU compute, run the jobs natively:
+Docker on macOS cannot access Apple Metal. To use native GPU compute, run the jobs natively:
 
 ```bash
 # Create and activate virtual environment
@@ -134,10 +134,14 @@ The FastAPI server provides granular interaction with the pipelines and analyzed
 | Method | Endpoint | Use Case |
 |--------|----------|----------|
 | `GET` | `/health` | Validates MongoDB ping, collection status, and system health. |
-| `POST` | `/jobs/trigger` | Triggers pipeline jobs (`scrape`, `clean`, `ner`). Executed asynchronously. |
-| `GET` | `/articles` | Retrieve paginated articles (`?collection=clean&search=foo`). |
-| `GET` | `/articles/ner/{url_b64}`| Fetch deep details of an NER-enriched article. |
-| `GET` | `/compare/tfidf` | Perform computational TD-IDF analysis (Clean vs. NER outputs). |
+| `GET` | `/stats` | Lightweight document counts per collection. |
+| `POST` | `/jobs/trigger` | Triggers pipeline jobs (`scrape`, `clean`, `ner`, `evaluate`). Executed asynchronously. |
+| `GET` | `/jobs` | List all tracked jobs and their current status. |
+| `GET` | `/jobs/{job_id}` | Poll a specific job by ID. |
+| `POST` | `/jobs/{job_id}/cancel` | Cancel a running job. |
+| `GET` | `/articles` | Retrieve paginated articles (`?collection=clean\|ner&search=foo`). |
+| `GET` | `/articles/ner/{url_b64}` | Fetch deep details of an NER-enriched article by base64-encoded URL. |
+| `GET` | `/compare/tfidf` | TF-IDF comparison between clean text and NER-enhanced text. |
 | `GET` | `/metrics` | Retrieve the latest historical model metrics. |
 
 ---
@@ -162,15 +166,21 @@ _Note: `db_restore.sh` drops current collections and enforces an overwrite._
 
 ```text
 nlp-article_analyzer/
-├── config/              # Centralized settings & environmental configs
+├── config/              # Environment-driven settings (bind-mounted into all containers)
 ├── docs/                # Extended system plans and architecture
-├── frontend/            # React/Vite visualization application
-├── scripts/             # Job runners, bootstrapping, & database migrations
-└── src/                 # Main Python logic
-    ├── cleaning/        # Text truncation, deduplication, and ranking rules
-    ├── database/        # Pymongo adapters, models, schema enforcement
-    ├── features/        # NLP routines (BERT NER setup)
-    ├── jobs/            # Job orchestrations (scrape_job, clean_job...)
-    ├── scraper/         # RSS parsing & newspaper3k extractors
-    └── web/             # FastAPI backend (routers, metrics, dependency injection)
+├── frontend/            # React/Vite app (Dashboard, NER Explorer, Comparison, Job Runner, Analysis)
+├── monitoring/          # Prometheus + Grafana configuration
+├── scripts/             # run_job.py, db_dump.sh, db_restore.sh
+└── src/                 # Main Python source
+    ├── cleaning/        # Quality ranking (0/1/2), URL recovery, text normalisation & signal extraction
+    ├── database/        # MongoDB connection, collection schemas, JSON validators, repositories
+    ├── evaluation/      # Strict entity-level NER metrics; classification metrics (seqeval)
+    ├── features/        # NER extraction (dslim/bert-base-NER, sliding-window chunking),
+    │                    # TF-IDF keywords, zero-shot topic classifier (BART)
+    ├── jobs/            # Job entry points: scrape, clean, classify, evaluate, analyze
+    ├── modelling/       # ML model wrappers and training utilities
+    ├── preprocessing/   # SpaCy/NLTK text processor; NER-tokenised text builder
+    ├── scraper/         # RSS feed collection via newspaper3k + feedparser; daily scheduler
+    ├── utils/           # Progress bar helpers
+    └── web/             # FastAPI app, route definitions, Prometheus metrics, middleware
 ```
