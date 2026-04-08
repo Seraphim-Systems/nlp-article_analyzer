@@ -1,19 +1,18 @@
 """
-Evaluate job — computes NER model performance metrics and persists results.
+Evaluate job — computes evaluation metrics and persists results.
 
-Entry point: run()
+Two evaluations are run:
 
-Strategy
---------
-Uses a silver-label approach: a random sample of articles is drawn from
-``nlp_ner.ner_articles`` (whose stored ``entities`` arrays become the reference).
-The NER model is then re-run on the same articles to produce fresh predictions,
-which are compared against the reference via span-level IoU matching.
+1. Separability (primary — answers the research question)
+   Computes mean pairwise cosine similarity for clean TF-IDF vs NER-enhanced
+   TF-IDF.  A lower NER similarity indicates more discriminative document
+   vectors, supporting the hypothesis that NER enrichment benefits classification.
 
-The first run will yield near-perfect scores because the model is being compared
-against its own previous output.  This is intentional — it establishes a
-performance baseline and will surface regressions if the model or pipeline ever
-changes.
+2. NER quality on CoNLL-2003 (secondary — validates the NER component)
+   Runs dslim/bert-base-NER on a sample of the CoNLL-2003 test split and
+   computes strict entity-level P/R/F1 via seqeval.  This is a real benchmark
+   against human-annotated ground truth, not a silver-label self-comparison.
+   Skipped gracefully if the dataset cannot be downloaded.
 """
 
 from __future__ import annotations
@@ -25,117 +24,133 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SAMPLE_SIZE = 500
-MODEL_VERSION = "dslim/bert-base-NER"
+MODEL_VERSION       = "dslim/bert-base-NER"
+SEPARABILITY_SAMPLE = 200
+CONLL_SAMPLE        = 500
 
 
 def run(dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the evaluation job.
 
-    Loads a random sample of NER articles, re-runs inference, computes
-    per-entity-type precision/recall/F1, and persists the run to
-    ``nlp_models.model_runs`` (unless ``dry_run=True``).
-
     Parameters
     ----------
     dry_run : bool
-        If True, compute metrics but do not write to MongoDB.
+        Compute metrics but do not write to MongoDB.
 
     Returns
     -------
-    dict with keys: status, model_version, metrics, errors, duration_seconds,
-    sample_size.
+    dict with keys: status, separability, conll_metrics, errors, duration_seconds.
     """
     log = log_fn or (lambda _: None)
     start_time = time.time()
     result: dict[str, Any] = {
-        "status": "success",
-        "model_version": MODEL_VERSION,
-        "metrics": {},
-        "errors": [],
+        "status":           "success",
+        "model_version":    MODEL_VERSION,
+        "separability":     None,
+        "conll_metrics":    None,
+        "errors":           [],
         "duration_seconds": 0,
-        "sample_size": 0,
     }
 
     try:
         from database.init_db import init_databases
-        from evaluation import compute_ner_metrics
-        from evaluation.sample_loader import load_ner_sample
-        from features.ner_extractor import batch_extract
-
         init_databases()
-        logger.info("=== Evaluate job started ===")
-        log(f"Loading {SAMPLE_SIZE} reference articles from ner_articles...")
 
-        reference = load_ner_sample(n=SAMPLE_SIZE)
-        if not reference:
-            log("No NER articles found — run the classify job first")
-            logger.warning("No NER articles found — run the classify job first.")
-            result["status"] = "success"
+        # ── 1. Separability evaluation ─────────────────────────────────────
+        log("Running separability evaluation (TF-IDF clean vs NER-enhanced)...")
+        logger.info("=== Evaluate job started — separability ===")
+
+        try:
+            from evaluation.separability_eval import compute_separability
+            sep = compute_separability(sample_size=SEPARABILITY_SAMPLE)
+            result["separability"] = sep
+            log(
+                f"Separability: improvement={sep['improvement_pct']:+.1f}%  "
+                f"verdict={sep['verdict']}  "
+                f"(n={sep['sample_size']})"
+            )
+            logger.info(
+                "Separability: improvement=%.1f%%  verdict=%s  n=%d",
+                sep["improvement_pct"], sep["verdict"], sep["sample_size"],
+            )
+        except Exception as exc:
+            msg = f"Separability eval failed: {exc}"
+            log(msg)
+            logger.exception("Separability evaluation failed")
+            result["errors"].append(msg)
+            result["status"] = "failed"
+            result["duration_seconds"] = round(time.time() - start_time, 2)
             return result
 
-        log(f"Loaded {len(reference):,} reference articles")
-        logger.info("Loaded %d reference articles for evaluation.", len(reference))
+        # ── 2. CoNLL-2003 NER quality evaluation ──────────────────────────
+        log(f"Running CoNLL-2003 NER evaluation (sample={CONLL_SAMPLE} sentences)...")
+        logger.info("=== Evaluate job — CoNLL-2003 NER quality ===")
 
-        log("Running NER inference on sample to generate predictions...")
-        predicted = batch_extract(reference)
-        log("Inference complete, computing metrics...")
-        logger.info("Inference complete.")
-
-        eval_results = compute_ner_metrics(predicted=predicted, reference=reference)
-
-        metrics_dict: dict[str, Any] = {
-            label: {
-                "precision": r.precision,
-                "recall":    r.recall,
-                "f1":        r.f1,
-                "support":   r.support,
-            }
-            for label, r in eval_results.items()
-        }
-
-        result["metrics"]     = metrics_dict
-        result["sample_size"] = len(reference)
-
-        overall = eval_results.get("overall")
-        if overall:
-            log(f"Overall: P={overall.precision:.3f}  R={overall.recall:.3f}  F1={overall.f1:.3f}  (n={len(reference):,})")
-            logger.info(
-                "Evaluation complete — overall P=%.4f  R=%.4f  F1=%.4f  (n=%d)",
-                overall.precision, overall.recall, overall.f1, len(reference),
+        try:
+            from evaluation.conll_eval import run_conll_eval
+            conll = run_conll_eval(sample_size=CONLL_SAMPLE)
+            result["conll_metrics"] = conll
+            log(
+                f"CoNLL-2003: P={conll['precision']:.3f}  "
+                f"R={conll['recall']:.3f}  "
+                f"F1={conll['f1']:.3f}  "
+                f"(n={conll['sample_size']} sentences)"
             )
-
-        for label, r in eval_results.items():
-            if label != "overall":
-                log(f"  {label:<8} P={r.precision:.3f}  R={r.recall:.3f}  F1={r.f1:.3f}  n={r.support}")
             logger.info(
-                "  %-8s  P=%.4f  R=%.4f  F1=%.4f  support=%d",
-                label, r.precision, r.recall, r.f1, r.support,
+                "CoNLL-2003: P=%.4f  R=%.4f  F1=%.4f  n=%d",
+                conll["precision"], conll["recall"], conll["f1"], conll["sample_size"],
             )
+            for label, m in conll.get("per_entity", {}).items():
+                log(f"  {label:<8} P={m['precision']:.3f}  R={m['recall']:.3f}  F1={m['f1']:.3f}  n={m['support']}")
+        except Exception as exc:
+            msg = f"CoNLL eval skipped: {exc}"
+            log(msg)
+            logger.warning("CoNLL-2003 evaluation skipped: %s", exc)
+            result["errors"].append(msg)
+            # Non-fatal — separability result is still valid
 
+        # ── 3. Persist ─────────────────────────────────────────────────────
         if not dry_run:
             from database.repositories import insert_model_run
 
+            conll = result["conll_metrics"] or {}
+            per_entity = conll.get("per_entity", {})
+            overall = {
+                "precision": conll.get("precision", 0.0),
+                "recall":    conll.get("recall",    0.0),
+                "f1":        conll.get("f1",        0.0),
+                "support":   sum(m.get("support", 0) for m in per_entity.values()),
+            }
+            metrics_doc = {**per_entity, **({"overall": overall} if conll else {})}
+
             run_doc: dict[str, Any] = {
                 "model_version":     MODEL_VERSION,
-                "metrics":           metrics_dict,
+                "eval_type":         "separability+conll",
+                "metrics":           metrics_doc,
+                "separability":      result["separability"],
+                "benchmark":         conll.get("benchmark", "conll2003"),
+                "conll_sample_size": conll.get("sample_size"),
                 "created_at":        datetime.now(timezone.utc).isoformat(),
-                "hyperparams":       {"model": MODEL_VERSION, "sample_size": len(reference)},
-                "training_set_size": len(reference),
+                "hyperparams": {
+                    "model":               MODEL_VERSION,
+                    "separability_sample": SEPARABILITY_SAMPLE,
+                    "conll_sample":        CONLL_SAMPLE,
+                },
+                "training_set_size": conll.get("sample_size") or SEPARABILITY_SAMPLE,
             }
             inserted_id = insert_model_run(run_doc)
             log("Results persisted to model_runs")
-            logger.info("Eval run persisted to nlp_models.model_runs (id=%s)", inserted_id)
+            logger.info("Eval run persisted (id=%s)", inserted_id)
         else:
             log("Dry run — metrics computed but not persisted")
             logger.info("DRY RUN: metrics computed but not persisted.")
 
-    except Exception as e:
+    except Exception as exc:
         logger.exception("Evaluate job failed")
-        log(f"Error: {e}")
+        log(f"Error: {exc}")
         result["status"] = "failed"
-        result["errors"].append(str(e))
+        result["errors"].append(str(exc))
 
     finally:
         result["duration_seconds"] = round(time.time() - start_time, 2)

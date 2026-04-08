@@ -108,11 +108,15 @@ class MetricsResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     model_version: str | None = None
     last_updated: str | None = None
+    # CoNLL-2003 NER quality (secondary — model validation)
     precision: float | None = None
     recall: float | None = None
     f1: float | None = None
     per_entity: dict[str, dict] | None = None
     sample_size: int | None = None
+    benchmark: str | None = None
+    # Separability (primary — research evaluation)
+    separability: dict | None = None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -643,7 +647,7 @@ async def separability_analysis(
 
 @app.get("/metrics", tags=["metrics"], response_model=MetricsResponse)
 async def get_metrics() -> MetricsResponse:
-    """Return the latest NER evaluation metrics, or empty response if none exist yet."""
+    """Return the latest evaluation results (separability + CoNLL-2003 NER quality)."""
     from evaluation.sample_loader import load_latest_run_metrics
 
     run = load_latest_run_metrics()
@@ -659,11 +663,13 @@ async def get_metrics() -> MetricsResponse:
     return MetricsResponse(
         model_version=run.get("model_version"),
         last_updated=run.get("created_at"),
-        precision=overall.get("precision"),
-        recall=overall.get("recall"),
-        f1=overall.get("f1"),
-        per_entity=per_entity,
-        sample_size=run.get("training_set_size"),
+        precision=overall.get("precision") or None,
+        recall=overall.get("recall") or None,
+        f1=overall.get("f1") or None,
+        per_entity=per_entity or None,
+        sample_size=run.get("conll_sample_size") or run.get("training_set_size"),
+        benchmark=run.get("benchmark"),
+        separability=run.get("separability"),
     )
 
 
