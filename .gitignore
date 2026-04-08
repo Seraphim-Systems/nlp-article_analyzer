@@ -226,3 +226,4 @@ hf_cache/
 # Environment variants
 .env.*
 !.env.example
+.DS_Store
