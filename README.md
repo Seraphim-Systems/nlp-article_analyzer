@@ -30,7 +30,7 @@ The project processes data sequentially through structured stages, avoiding data
 flowchart LR
     A[RSS Feeds] -->|Scrape| B[(nlp_raw)]
     B -->|Clean / Rank| C[(nlp_clean)]
-    C -->|Classify (NER)| D[(nlp_ner)]
+    C -->|Classify / NER| D[(nlp_ner)]
     D --> E[FastAPI & Metrics]
     E --> F[React Dashboard]
 ```
