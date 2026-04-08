@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { LayoutDashboard, FlaskConical, BarChart3, Play, Menu, Microscope } from 'lucide-react'
+import { LayoutDashboard, FlaskConical, BarChart3, Play, Menu, Microscope, ShieldCheck } from 'lucide-react'
 import { useQuery } from './hooks/useQuery'
 import { api } from './api/client'
 import Dashboard   from './pages/Dashboard'
 import NERExplorer from './pages/NERExplorer'
 import Comparison  from './pages/Comparison'
 import JobRunner   from './pages/JobRunner'
-import Findings    from './pages/Findings'
+import Findings      from './pages/Findings'
+import EvaluationMetrics  from './pages/EvaluationMetrics'
 
 // ── Logo ───────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,7 @@ const NAV = [
   { to: '/compare',  icon: <BarChart3 size={16} />,       label: 'TF-IDF Compare' },
   { to: '/analysis', icon: <Microscope size={16} />,      label: 'Analysis' },
   { to: '/jobs',     icon: <Play size={16} />,            label: 'Job Runner' },
+  { to: '/admin',    icon: <ShieldCheck size={16} />,    label: 'Evaluation' },
 ]
 
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
@@ -198,6 +200,7 @@ export default function App() {
             <Route path="/compare"  element={<Comparison />} />
             <Route path="/analysis" element={<Findings />} />
             <Route path="/jobs"     element={<JobRunner />} />
+            <Route path="/admin"    element={<EvaluationMetrics />} />
           </Routes>
         </main>
       </div>
