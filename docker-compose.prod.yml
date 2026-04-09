@@ -21,18 +21,11 @@
 #
 # For local development, use docker-compose.yml instead.
 
-version: "3.9"
-
 volumes:
   hf_cache_prod:
     driver: local
   mongo_data_prod:
     driver: local
-    driver_opts:
-      # Optional: configure backup location
-      type: none
-      o: bind
-      device: /mnt/nlp_data/mongo
   prometheus_data_prod:
     driver: local
   grafana_data_prod:
@@ -51,9 +44,8 @@ services:
       - mongo_data_prod:/data/db
     environment:
       MONGO_INITDB_DATABASE: admin
-      # Optional: Enable auth in production
-      # MONGO_INITDB_ROOT_USERNAME: admin
-      # MONGO_INITDB_ROOT_PASSWORD: <secure-password>
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-}
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -91,18 +83,17 @@ services:
     networks:
       - nlp_proxy_network
     environment:
-      MONGO_URI: mongodb://mongodb:27017
-      RAW_DB_NAME: nlp_raw
-      CLEAN_DB_NAME: nlp_clean
-      CLASSIFIED_DB_NAME: nlp_classified
-      MODELS_DB_NAME: nlp_models
-      NER_DB_NAME: nlp_ner
-      NER_COLLECTION: ner_articles
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      RAW_DB_NAME: ${RAW_DB_NAME:-nlp_raw}
+      CLEAN_DB_NAME: ${CLEAN_DB_NAME:-nlp_clean}
+      CLASSIFIED_DB_NAME: ${CLASSIFIED_DB_NAME:-nlp_classified}
+      MODELS_DB_NAME: ${MODELS_DB_NAME:-nlp_models}
+      NER_DB_NAME: ${NER_DB_NAME:-nlp_ner}
+      NER_COLLECTION: ${NER_COLLECTION:-ner_articles}
       PYTHONUNBUFFERED: "1"
-      LOG_LEVEL: INFO
-      # Kaggle bootstrap (set in .env if needed)
-      KAGGLE_ENABLED: "true"
-      SKIP_BOOTSTRAP: "true"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      KAGGLE_ENABLED: ${KAGGLE_ENABLED:-false}
+      SKIP_BOOTSTRAP: ${SKIP_BOOTSTRAP:-true}
     # Entrypoint handles init + bootstrap, then waits for scheduled job execution
     # (orchestrated externally via cron/K8s CronJob or manual CLI)
     command: wait
@@ -160,20 +151,17 @@ services:
     networks:
       - nlp_proxy_network
     environment:
-      MONGO_URI: mongodb://mongodb:27017
-      RAW_DB_NAME: nlp_raw
-      CLEAN_DB_NAME: nlp_clean
-      CLASSIFIED_DB_NAME: nlp_classified
-      MODELS_DB_NAME: nlp_models
-      NER_DB_NAME: nlp_ner
-      NER_COLLECTION: ner_articles
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      RAW_DB_NAME: ${RAW_DB_NAME:-nlp_raw}
+      CLEAN_DB_NAME: ${CLEAN_DB_NAME:-nlp_clean}
+      CLASSIFIED_DB_NAME: ${CLASSIFIED_DB_NAME:-nlp_classified}
+      MODELS_DB_NAME: ${MODELS_DB_NAME:-nlp_models}
+      NER_DB_NAME: ${NER_DB_NAME:-nlp_ner}
+      NER_COLLECTION: ${NER_COLLECTION:-ner_articles}
       PYTHONUNBUFFERED: "1"
-      LOG_LEVEL: INFO
-      # Kaggle bootstrap (disabled in production after initial setup)
-      KAGGLE_ENABLED: "false"
-      SKIP_BOOTSTRAP: "true"
-      # Optional: APM (Application Performance Monitoring)
-      # SENTRY_DSN: https://...
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      KAGGLE_ENABLED: ${KAGGLE_ENABLED:-false}
+      SKIP_BOOTSTRAP: ${SKIP_BOOTSTRAP:-true}
     # Entrypoint handles init, CMD specifies 'api' service
     command: api
     expose:
