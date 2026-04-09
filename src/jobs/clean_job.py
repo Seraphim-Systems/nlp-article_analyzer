@@ -14,7 +14,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
+def run(
+    limit: int = 0, rank1_limit: int = 1000, dry_run: bool = False, log_fn=None
+) -> dict[str, Any]:
     """
     Execute the cleaning job.
 
@@ -28,6 +30,8 @@ def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     ----------
     limit : int
         Maximum number of articles to process in recovery and promotion steps.
+    rank1_limit : int
+        Maximum number of Rank-1 articles to attempt URL recovery on (default 1000).
     dry_run : bool
         If True, analyze but don't update collections.
 
@@ -71,7 +75,7 @@ def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
             from cleaning.cleaner import run_cleaning_pipeline
 
             log("Running cleaning pipeline: rank, recover, promote...")
-            summary = run_cleaning_pipeline(limit=limit)
+            summary = run_cleaning_pipeline(limit=limit, rank1_limit=rank1_limit)
             result["promoted"] = summary.get("promoted", 0)
             result["discarded"] = summary.get("discarded", 0)
             log(f"Promoted {result['promoted']:,} articles to clean collection")
@@ -88,7 +92,9 @@ def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
 
     finally:
         result["duration_seconds"] = time.time() - start_time
-        log(f"Finished in {result['duration_seconds']:.1f}s — status: {result['status']}")
+        log(
+            f"Finished in {result['duration_seconds']:.1f}s — status: {result['status']}"
+        )
         logger.info(
             "=== Clean job finished (status=%s, duration=%.2fs) ===",
             result["status"],

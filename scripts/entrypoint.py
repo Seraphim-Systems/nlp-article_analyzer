@@ -267,7 +267,8 @@ def bootstrap_from_kaggle() -> bool:
 
         _status(INFO, "Running cleaning pipeline...")
         clean_result = run_cleaning_pipeline(
-            skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY
+            skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY,
+            rank1_limit=settings.RANK1_LIMIT,
         )
         _status(
             OK,
