@@ -16,8 +16,8 @@ on:
       reset_volumes:
         description: "If true, remove contents of <deploy_path>/data before deploying"
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: 'false'
     secrets:
       HETZNER_IP:
         required: true

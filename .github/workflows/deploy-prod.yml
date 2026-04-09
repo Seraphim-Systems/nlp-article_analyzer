@@ -7,7 +7,7 @@ on:
         description: "If true, remove contents of <deploy_path>/data before deploying"
         required: false
         default: 'false'
-        type: boolean
+        type: string
 
 jobs:
   production-deploy:
