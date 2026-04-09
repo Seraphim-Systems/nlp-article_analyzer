@@ -209,6 +209,7 @@ def build_article_dict(
     sum_: str | None = None,
     text: str | None = None,
     clean_text: str | None = None,
+    preprocessed_text: str | None = None,
     money_tags: list[str] | None = None,
     percent_tags: list[str] | None = None,
     datetime_tags: list[str] | None = None,
