@@ -52,6 +52,7 @@ services:
         condition: service_healthy
     networks:
       - proxy
+    env_file: .env
     environment:
       MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw
@@ -63,6 +64,8 @@ services:
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+      KAGGLE_KEY: ${KAGGLE_KEY}
       SKIP_BOOTSTRAP: "false"
     command: wait
     volumes:
@@ -116,6 +119,7 @@ services:
         condition: service_healthy
     networks:
       - proxy
+    env_file: .env
     environment:
       MONGO_URI: mongodb://mongodb:27017
       RAW_DB_NAME: nlp_raw
@@ -127,6 +131,8 @@ services:
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "false"
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+      KAGGLE_KEY: ${KAGGLE_KEY}
       SKIP_BOOTSTRAP: "true"
     command: api
     expose:
