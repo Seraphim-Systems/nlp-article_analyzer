@@ -7,6 +7,7 @@ Entry point: run()
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date
 from typing import Any
@@ -80,7 +81,7 @@ def _print_collection_sizes() -> None:
     print("", flush=True)
 
 
-def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
+def run(for_date: date | None = None, dry_run: bool = False, log_fn=None, stop_event: threading.Event | None = None) -> dict[str, Any]:
     """
     Execute the NER classification job.
 
@@ -89,6 +90,7 @@ def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dic
     """
     import re as _re
     _log = log_fn or (lambda _: None)
+    _stop = stop_event or threading.Event()
 
     def _print(tag: str, msg: str) -> None:
         print(f"  {tag} {msg}", flush=True)
@@ -145,6 +147,9 @@ def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dic
         )
 
         for i in pbar:
+            if _stop.is_set():
+                _print(WARN, "NER job cancelled.")
+                break
             chunk = articles[i : i + BATCH]
 
             _batch_start = time.time()

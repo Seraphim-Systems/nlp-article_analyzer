@@ -15,6 +15,7 @@ Or invoked from scripts/run_daily.py by an OS-level cron / Task Scheduler job.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date
 
@@ -40,6 +41,7 @@ def run_scrape_job(
     for_date: date | None = None,
     run_cleaning: bool | None = None,
     log_fn=None,
+    stop_event: threading.Event | None = None,
 ) -> None:
     """
     Execute one full scrape cycle.
@@ -52,6 +54,7 @@ def run_scrape_job(
         Called with a progress string after each feed completes.
     """
     log = log_fn or (lambda _: None)
+    _stop = stop_event or threading.Event()
     target = for_date or date.today()
     logger.info("=== Scrape job started for %s ===", target)
 
@@ -60,6 +63,9 @@ def run_scrape_job(
     log(f"Found {len(scrapers)} feeds to scrape")
 
     for scraper in scrapers:
+        if _stop.is_set():
+            log("Scrape cancelled.")
+            break
         log(f"Fetching: {scraper.name}...")
         try:
             articles = scraper.scrape_today(target)

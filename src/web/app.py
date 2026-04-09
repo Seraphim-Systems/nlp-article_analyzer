@@ -268,11 +268,11 @@ def _append_log(job_id: str, message: str) -> None:
             _jobs[job_id]["logs"].append(message)
 
 
-def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
+def _run_job_thread(job_id: str, job_name: str, dry_run: bool, stop_event: threading.Event) -> None:
     """Execute a job in a background thread and record result."""
     import time as _time
     with _jobs_lock:
-        if _jobs[job_id].get("cancel_requested"):
+        if stop_event.is_set():
             return
         _jobs[job_id]["status"] = "running"
     _start = _time.perf_counter()
@@ -283,20 +283,19 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
 
     try:
         from jobs import run_job
-        result = run_job(job_name, dry_run=dry_run, log_fn=_log)
+        result = run_job(job_name, dry_run=dry_run, log_fn=_log, stop_event=stop_event)
         with _jobs_lock:
-            if _jobs[job_id].get("cancel_requested"):
-                _status = "cancelled"
-            else:
-                _status = "success" if result.get("status") == "success" else "failed"
+            _status = "cancelled" if stop_event.is_set() else (
+                "success" if result.get("status") == "success" else "failed"
+            )
             _jobs[job_id]["status"] = _status
             _jobs[job_id]["result"] = result
     except Exception as e:
         with _jobs_lock:
-            if not _jobs[job_id].get("cancel_requested"):
-                _jobs[job_id]["status"] = "failed"
+            _status = "cancelled" if stop_event.is_set() else "failed"
+            _jobs[job_id]["status"] = _status
+            if _status == "failed":
                 _jobs[job_id]["result"] = {"error": str(e)}
-            _status = _jobs[job_id]["status"]
     finally:
         _duration = _time.perf_counter() - _start
         with _jobs_lock:
@@ -318,6 +317,7 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
     job_id = str(uuid.uuid4())[:8]
+    stop_event = threading.Event()
     with _jobs_lock:
         _jobs[job_id] = {
             "job_id":      job_id,
@@ -327,11 +327,12 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
             "finished_at": None,
             "result":      None,
             "logs":        [],
+            "_stop_event": stop_event,
         }
 
     t = threading.Thread(
         target=_run_job_thread,
-        args=(job_id, request.job_name, request.dry_run),
+        args=(job_id, request.job_name, request.dry_run, stop_event),
         daemon=True,
     )
     t.start()
@@ -352,6 +353,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         snapshot = dict(job) if job else None
     if not snapshot:
         raise HTTPException(404, f"Job {job_id} not found")
+    snapshot.pop("_stop_event", None)
     return JobStatusResponse(**snapshot)
 
 
@@ -359,7 +361,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
 async def list_jobs() -> dict:
     """List all tracked jobs (most recent first)."""
     with _jobs_lock:
-        snapshot = [dict(j) for j in _jobs.values()]
+        snapshot = [{k: v for k, v in j.items() if k != "_stop_event"} for j in _jobs.values()]
     jobs = sorted(snapshot, key=lambda j: j["started_at"], reverse=True)
     return {"jobs": jobs[:50]}
 
@@ -373,8 +375,8 @@ async def cancel_job(job_id: str) -> dict:
             raise HTTPException(404, f"Job {job_id} not found")
         if job["status"] not in ("queued", "running"):
             raise HTTPException(400, f"Job {job_id} is already {job['status']}")
+        _jobs[job_id]["_stop_event"].set()
         _jobs[job_id]["status"] = "cancelled"
-        _jobs[job_id]["cancel_requested"] = True
         _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
     return {"job_id": job_id, "status": "cancelled"}
 
