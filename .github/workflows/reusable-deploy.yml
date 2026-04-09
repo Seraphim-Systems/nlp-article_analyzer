@@ -46,10 +46,38 @@ jobs:
             set -e
             echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
             
-            # Optional: reset persistent volumes/data directory
+            # Optional: reset persistent volumes/data directory and drop DBs
             if [ "${{ inputs.reset_volumes }}" = "true" ]; then
               echo "--- Resetting volumes at ${{ inputs.deploy_path }}/data ---"
+
+              # Determine compose file (same logic used later)
+              COMPOSE_FILE="docker-compose.yml"
+              [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
+
+              # Stop any running stack to avoid file locks
+              docker compose -f "$COMPOSE_FILE" down || true
+
+              # Remove host-mounted data (hf_cache, mongo, prometheus, grafana)
               rm -rf "${{ inputs.deploy_path }}/data"/* || true
+
+              # Start MongoDB alone so we can drop databases explicitly
+              docker compose -f "$COMPOSE_FILE" up -d mongodb || true
+
+              # Wait for MongoDB to accept connections
+              for i in $(seq 1 30); do
+                if docker compose -f "$COMPOSE_FILE" exec -T mongodb mongosh --quiet --eval "db.adminCommand('ping')" >/dev/null 2>&1; then
+                  echo "MongoDB is ready"
+                  break
+                fi
+                echo "Waiting for MongoDB... ($i)"
+                sleep 2
+              done
+
+              # Drop application databases to ensure a clean state
+              docker compose -f "$COMPOSE_FILE" exec -T mongodb mongosh --quiet --eval "db.getSiblingDB('nlp_raw').dropDatabase(); db.getSiblingDB('nlp_clean').dropDatabase(); db.getSiblingDB('nlp_classified').dropDatabase(); db.getSiblingDB('nlp_models').dropDatabase(); db.getSiblingDB('nlp_ner').dropDatabase();" || true
+
+              # Stop the temporary mongo service so the full stack can start fresh later
+              docker compose -f "$COMPOSE_FILE" down || true
             fi
             
             # 1. Prepare directory
