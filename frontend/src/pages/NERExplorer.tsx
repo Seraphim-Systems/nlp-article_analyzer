@@ -302,10 +302,7 @@ export default function NERExplorer() {
   const showNER = collection === 'ner'
 
   return (
-    <div
-      className="fade-up"
-      style={{ display: 'grid', gridTemplateColumns: '320px 1fr', height: 'calc(100vh - 80px)', overflow: 'hidden' }}
-    >
+    <div className="fade-up ner-explorer-layout">
       {/* Left panel */}
       <div style={{
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
