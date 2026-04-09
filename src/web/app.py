@@ -263,8 +263,6 @@ async def get_stats() -> dict:
 # Jobs
 # ──────────────────────────────────────────────────────────────
 
-# In-memory stop events — only lives as long as the process, but that's
-# enough: cancellation signals are only needed for running threads.
 _stop_events: dict[str, threading.Event] = {}
 _stop_events_lock = threading.Lock()
 
