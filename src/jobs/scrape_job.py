@@ -7,6 +7,7 @@ Entry point: run()
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date
 from typing import Any
@@ -14,7 +15,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
+def run(for_date: date | None = None, dry_run: bool = False, log_fn=None, stop_event: threading.Event | None = None) -> dict[str, Any]:
     """
     Execute a scrape job.
 
@@ -39,6 +40,7 @@ def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dic
         - duration_seconds: execution time
     """
     log = log_fn or (lambda _: None)
+    _stop = stop_event or threading.Event()
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",
@@ -64,7 +66,7 @@ def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dic
             logger.info("DRY RUN: Would scrape for date %s", target)
         else:
             log("Fetching RSS feeds and collecting articles...")
-            run_scrape_job(for_date=target, log_fn=log)
+            run_scrape_job(for_date=target, log_fn=log, stop_event=_stop)
             log("Feed collection complete")
             logger.info("Scrape job completed for %s", target)
 

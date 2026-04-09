@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date
 from typing import Any
@@ -25,6 +26,7 @@ def run_job(
     dry_run: bool = False,
     limit: int = 0,
     log_fn: Any = None,
+    stop_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """
     Run a named job with optional date override and dry-run mode.
@@ -54,11 +56,12 @@ def run_job(
     """
     job_name = job_name.lower().strip()
     _log = log_fn or (lambda _: None)
+    _stop = stop_event or threading.Event()
 
     if job_name == "scrape":
         from jobs.scrape_job import run as scrape_run
 
-        return scrape_run(for_date=for_date, dry_run=dry_run, log_fn=_log)
+        return scrape_run(for_date=for_date, dry_run=dry_run, log_fn=_log, stop_event=_stop)
     elif job_name == "clean":
         from jobs.clean_job import run as clean_run
 

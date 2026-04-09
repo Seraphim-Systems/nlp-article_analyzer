@@ -7,6 +7,7 @@ Entry point: run()
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -41,6 +42,7 @@ def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
         - duration_seconds: execution time
     """
     log = log_fn or (lambda _: None)
+    _stop = threading.Event()
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",
@@ -57,6 +59,10 @@ def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
 
         logger.info("=== Clean job started ===")
         log("Ranking raw articles...")
+
+        if _stop.is_set():
+            result["status"] = "cancelled"
+            return result
 
         if dry_run:
             log("Dry run — no changes committed")

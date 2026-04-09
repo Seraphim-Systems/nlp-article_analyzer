@@ -6,6 +6,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend,
 } from 'recharts'
 import { Info, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { LoadingSpinner, ErrorMessage, PageHeader, MetricCard } from '../components'
 
 const NER_LABEL_COLOR: Record<string, string> = {
   PER: 'var(--ner-per)', ORG: 'var(--ner-org)', LOC: 'var(--ner-loc)', MISC: 'var(--ner-misc)',
@@ -226,10 +227,7 @@ export default function Comparison() {
 
   return (
     <div className="fade-up">
-      <div className="page-header">
-        <h2>TF-IDF Comparison</h2>
-        <p>How Named Entity Recognition reshapes document term importance</p>
-      </div>
+      <PageHeader title="TF-IDF Comparison" description="How Named Entity Recognition reshapes document term importance" />
 
       {/* ── Thesis explainer ── */}
       <div className="card" style={{ marginBottom: 20, background: 'var(--bg-elevated)', borderColor: 'var(--border-mid)' }}>
@@ -268,13 +266,9 @@ export default function Comparison() {
         </button>
       </div>
 
-      {loading && <div className="loading"><div className="spinner" /> Computing TF-IDF…</div>}
+      {loading && <LoadingSpinner message="Computing TF-IDF..." />}
 
-      {error && (
-        <div className="card" style={{ borderColor: 'var(--error)', color: 'var(--error)', fontSize: 13 }}>
-          {error.includes('503') ? 'NER job not yet complete — run the NER job first.' : error}
-        </div>
-      )}
+      {error && <ErrorMessage message={error} onRetry={reload} />}
 
       {data && !loading && (
         <>
@@ -282,17 +276,11 @@ export default function Comparison() {
           <div className="grid-4" style={{ marginBottom: 20 }}>
             {[
               { label: 'Sample articles',    value: data.sample_size,      cls: '',      sub: 'documents analysed' },
-              { label: 'New NER terms',      value: newCount,              cls: 'green', sub: `of 25 unique to NER` },
+              { label: 'New NER terms',      value: newCount,              cls: 'green', sub: 'of 25 unique to NER' },
               { label: 'Rank shifts',        value: movedCount,            cls: 'accent',sub: 'terms that moved' },
               { label: 'NER token ratio',    value: `${Math.round(data.ner_token_ratio * 100)}%`, cls: 'gold', sub: 'of top-25 are NER' },
             ].map(s => (
-              <div className="stat-card" key={s.label}>
-                <div className="stat-label">{s.label}</div>
-                <div className={`stat-value ${s.cls}`} style={{ fontSize: '1.4rem' }}>
-                  {s.value.toLocaleString()}
-                </div>
-                <div className="stat-sub">{s.sub}</div>
-              </div>
+              <MetricCard key={s.label} label={s.label} value={s.value} colorClass={s.cls} sub={s.sub} />
             ))}
           </div>
 

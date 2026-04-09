@@ -65,6 +65,15 @@ def _char_offset_of_word(words: list[str], word_idx: int) -> int:
     return sum(len(w) + 1 for w in words[:word_idx])
 
 
+def _snap_to_word(text: str, start: int, end: int) -> tuple[int, int]:
+    """Extend start/end to cover the full word, preventing mid-word entity splits."""
+    while start > 0 and text[start - 1] not in (' ', '\t', '\n'):
+        start -= 1
+    while end < len(text) and text[end] not in (' ', '\t', '\n'):
+        end += 1
+    return start, end
+
+
 def _extract_chunked(normalized: str, nlp) -> list[dict[str, Any]]:
     """
     Run NER over arbitrarily long text by splitting into overlapping word-chunks.
@@ -80,10 +89,16 @@ def _extract_chunked(normalized: str, nlp) -> list[dict[str, Any]]:
 
     if len(words) <= _CHUNK_WORDS:
         raw = nlp(normalized)
-        return [
-            {"text": e["word"], "label": e["entity_group"], "start": e["start"], "end": e["end"]}
-            for e in raw
-        ]
+        result = []
+        for e in raw:
+            s, en = _snap_to_word(normalized, e["start"], e["end"])
+            result.append({
+                "text": normalized[s:en],
+                "label": e["entity_group"],
+                "start": s,
+                "end": en,
+            })
+        return result
 
     seen: set[tuple[int, int, str]] = set()
     entities: list[dict[str, Any]] = []
@@ -95,13 +110,14 @@ def _extract_chunked(normalized: str, nlp) -> list[dict[str, Any]]:
         offset     = _char_offset_of_word(words, start_w)
 
         for e in nlp(chunk_text):
-            abs_start = e["start"] + offset
-            abs_end   = e["end"]   + offset
+            cs, ce = _snap_to_word(chunk_text, e["start"], e["end"])
+            abs_start = cs + offset
+            abs_end   = ce + offset
             key = (abs_start, abs_end, e["entity_group"])
             if key not in seen:
                 seen.add(key)
                 entities.append({
-                    "text":  e["word"],
+                    "text":  chunk_text[cs:ce],
                     "label": e["entity_group"],
                     "start": abs_start,
                     "end":   abs_end,

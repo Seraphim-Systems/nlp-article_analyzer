@@ -264,6 +264,7 @@ async def get_stats() -> dict:
 # ──────────────────────────────────────────────────────────────
 
 
+
 def _append_log(job_id: str, message: str) -> None:
     append_job_log(job_id, message)
 
@@ -288,7 +289,7 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
 
         result = run_job(job_name, dry_run=dry_run, log_fn=_log)
 
-        # Re-check cancellation before finishing
+
         latest_job = get_job_by_id(job_id)
         if latest_job and latest_job.get("cancel_requested"):
             _status = "cancelled"
@@ -331,7 +332,7 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
 @app.post("/jobs/trigger", tags=["jobs"], response_model=JobTriggerResponse)
 async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
     """Trigger a pipeline job asynchronously."""
-    valid = {"scrape", "clean", "classify", "ner", "evaluate"}
+    valid = {"scrape", "clean", "ner", "evaluate"}
     if request.job_name not in valid:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 

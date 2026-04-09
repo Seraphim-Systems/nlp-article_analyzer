@@ -27,8 +27,8 @@ def build_ner_preprocessed_text(body: str, entities: list[dict]) -> str:
     if not body:
         return ""
 
+    ner_body = " ".join(body.split())
     ents = sorted(entities, key=lambda e: e.get("start", 0), reverse=True)
-    ner_body = body
     for ent in ents:
         label = ent.get("label", "MISC")
         text  = ent.get("text", "").replace(" ", "_")

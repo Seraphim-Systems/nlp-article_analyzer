@@ -7,6 +7,7 @@ Entry point: run()
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import date
 from typing import Any
@@ -89,6 +90,7 @@ def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log
     """
     import re as _re
     _log = log_fn or (lambda _: None)
+    _stop = threading.Event()
 
     def _print(tag: str, msg: str) -> None:
         print(f"  {tag} {msg}", flush=True)
@@ -145,6 +147,9 @@ def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log
         )
 
         for i in pbar:
+            if _stop.is_set():
+                _print(WARN, "NER job cancelled.")
+                break
             chunk = articles[i : i + BATCH]
 
             _batch_start = time.time()
@@ -186,7 +191,7 @@ def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log
                         NER_ENTITIES_EXTRACTED_TOTAL.labels(
                             entity_type=ent.get("label", "MISC")
                         ).inc()
-            except ImportError:
+            except (ImportError, AttributeError, TypeError, ValueError):
                 pass
 
             if not dry_run and len(pending) >= FLUSH_EVERY:

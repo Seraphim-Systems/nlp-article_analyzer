@@ -86,6 +86,10 @@ def get_ner_collection() -> Collection:
     )
 
 
+def get_quarantine_collection() -> Collection:
+    return get_raw_db()["quarantine"]
+
+
 def get_entities_collection() -> Collection:
     """Get or create the entities collection in RAW_DB."""
     return _ensure_collection(

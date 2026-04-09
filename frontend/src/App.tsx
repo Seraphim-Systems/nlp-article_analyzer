@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import { LayoutDashboard, FlaskConical, BarChart3, Play, Menu, Microscope, ShieldCheck } from 'lucide-react'
 import { useQuery } from './hooks/useQuery'
 import { api } from './api/client'
-import Dashboard   from './pages/Dashboard'
-import NERExplorer from './pages/NERExplorer'
-import Comparison  from './pages/Comparison'
-import JobRunner   from './pages/JobRunner'
-import Findings      from './pages/Findings'
-import EvaluationMetrics  from './pages/EvaluationMetrics'
+import { ErrorBoundary, LoadingSpinner } from './components'
+
+const Dashboard         = lazy(() => import('./pages/Dashboard'))
+const NERExplorer       = lazy(() => import('./pages/NERExplorer'))
+const Comparison        = lazy(() => import('./pages/Comparison'))
+const JobRunner         = lazy(() => import('./pages/JobRunner'))
+const Findings          = lazy(() => import('./pages/Findings'))
+const EvaluationMetrics = lazy(() => import('./pages/EvaluationMetrics'))
 
 // ── Logo ───────────────────────────────────────────────────────────────────
 
@@ -33,7 +35,7 @@ function RadarLogo({ size = 28 }: { size?: number }) {
 
 // ── Header ─────────────────────────────────────────────────────────────────
 
-function Header({ collapsed }: { collapsed: boolean }) {
+function Header({ collapsed, onMobileToggle }: { collapsed: boolean; onMobileToggle: () => void }) {
   const { data, error } = useQuery(() => api.health(), [], { interval: 30_000 })
 
   const mongo = !error && data?.mongodb === 'healthy'
@@ -42,6 +44,13 @@ function Header({ collapsed }: { collapsed: boolean }) {
   return (
     <header className="header" style={{ gridColumn: '1 / -1' }}>
       <div className="header-brand" style={{ gap: collapsed ? 0 : 10, overflow: 'hidden', transition: 'gap 0.2s' }}>
+        <button
+          className="mobile-menu-btn"
+          onClick={onMobileToggle}
+          aria-label="Toggle navigation menu"
+        >
+          <Menu size={18} />
+        </button>
         <RadarLogo size={26} />
         <span style={{
           fontFamily: 'var(--font-display)',
@@ -94,10 +103,11 @@ const NAV = [
   { to: '/admin',    icon: <ShieldCheck size={16} />,    label: 'Evaluation' },
 ]
 
-function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function Sidebar({ collapsed, onToggle, mobileOpen }: { collapsed: boolean; onToggle: () => void; mobileOpen: boolean }) {
   return (
     <nav
-      className="sidebar"
+      className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}
+      aria-label="Main navigation"
       style={{
         width: collapsed ? 52 : 220,
         minWidth: collapsed ? 52 : 220,
@@ -184,24 +194,37 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
 
 export default function App() {
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
     <BrowserRouter>
+      <a href="#main-content" className="skip-link">Skip to content</a>
       <div
         className="shell"
         style={{ gridTemplateColumns: `${collapsed ? 52 : 220}px 1fr`, transition: 'grid-template-columns 0.22s ease' }}
       >
-        <Header collapsed={collapsed} />
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
-        <main className="main">
-          <Routes>
-            <Route path="/"         element={<Dashboard />} />
-            <Route path="/ner"      element={<NERExplorer />} />
-            <Route path="/compare"  element={<Comparison />} />
-            <Route path="/analysis" element={<Findings />} />
-            <Route path="/jobs"     element={<JobRunner />} />
-            <Route path="/admin"    element={<EvaluationMetrics />} />
-          </Routes>
+        <Header collapsed={collapsed} onMobileToggle={() => setMobileOpen(o => !o)} />
+        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} mobileOpen={mobileOpen} />
+        {mobileOpen && (
+          <div
+            className="sidebar-overlay"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+        <main className="main" id="main-content">
+          <ErrorBoundary>
+            <Suspense fallback={<LoadingSpinner message="Loading..." />}>
+              <Routes>
+                <Route path="/"         element={<Dashboard />} />
+                <Route path="/ner"      element={<NERExplorer />} />
+                <Route path="/compare"  element={<Comparison />} />
+                <Route path="/analysis" element={<Findings />} />
+                <Route path="/jobs"     element={<JobRunner />} />
+                <Route path="/admin"    element={<EvaluationMetrics />} />
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
     </BrowserRouter>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '../hooks/useQuery'
 import { api, SeparabilityData, EvalMetrics, EntityMetrics } from '../api/client'
 import { TrendingDown, TrendingUp, Minus, FlaskConical, Activity } from 'lucide-react'
+import { LoadingSpinner, ErrorMessage, PageHeader } from '../components'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -279,7 +280,7 @@ function ClassificationCard({ evalData, loading }: { evalData: EvalMetrics | nul
         </span>
       </div>
 
-      {loading && <div className="loading"><div className="spinner" /></div>}
+      {loading && <LoadingSpinner size="sm" />}
 
       {!loading && (!evalData?.f1) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0' }}>
@@ -377,10 +378,7 @@ export default function Findings() {
 
   return (
     <div className="fade-up">
-      <div className="page-header">
-        <h2>Analysis</h2>
-        <p>Does NER-enhanced TF-IDF improve document separability for classification?</p>
-      </div>
+      <PageHeader title="Analysis" description="Does NER-enhanced TF-IDF improve document separability for classification?" />
 
       <div className="flex items-center gap-3" style={{ marginBottom: 20 }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sample size:</span>
@@ -399,18 +397,9 @@ export default function Findings() {
         </button>
       </div>
 
-      {loading && (
-        <div className="loading">
-          <div className="spinner" />
-          Computing pairwise similarity...
-        </div>
-      )}
+      {loading && <LoadingSpinner message="Computing pairwise similarity..." />}
 
-      {error && (
-        <div className="card" style={{ borderColor: 'var(--error)', color: 'var(--error)', fontSize: 13 }}>
-          {error.includes('503') ? 'NER job not yet complete — run the NER job first.' : error}
-        </div>
-      )}
+      {error && <ErrorMessage message={error} onRetry={reload} />}
 
       {data && !loading && (
         <>

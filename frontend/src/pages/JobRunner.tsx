@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, Job } from '../api/client'
 import { Play, Square, RefreshCw, Clock, CheckCircle, XCircle, Loader, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
+import { ErrorMessage, PageHeader, StatusIcon } from '../components'
 
 // ── Job definitions ─────────────────────────────────────────────────────────
 
@@ -20,16 +21,9 @@ const JOBS = [
     rgba:  'rgba(96,165,250,0.07)',
   },
   {
-    id:    'classify',
-    label: 'Classify',
-    desc:  'BERT NER extraction and build ner_preprocessed_text',
-    color: 'var(--ner-org)',
-    rgba:  'rgba(56,189,248,0.07)',
-  },
-  {
     id:    'ner',
     label: 'NER',
-    desc:  'Entity tagging pipeline into ner_articles collection',
+    desc:  'BERT NER extraction into ner_articles collection',
     color: 'var(--ner-loc)',
     rgba:  'rgba(52,211,153,0.07)',
   },
@@ -92,17 +86,6 @@ function formatResult(result: Record<string, unknown>): string {
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
-
-function StatusIcon({ status }: { status: string }) {
-  switch (status) {
-    case 'queued':    return <Clock       size={13} style={{ color: 'var(--gold)' }} />
-    case 'running':   return <Loader      size={13} style={{ color: 'var(--accent-hi)', animation: 'spin 0.8s linear infinite' }} />
-    case 'success':   return <CheckCircle size={13} style={{ color: 'var(--success)' }} />
-    case 'failed':    return <XCircle     size={13} style={{ color: 'var(--error)' }} />
-    case 'cancelled': return <Square      size={13} style={{ color: 'var(--text-muted)' }} />
-    default:          return null
-  }
-}
 
 function ElapsedTimer({ startedAt }: { startedAt: string }) {
   const [elapsed, setElapsed] = useState(0)
@@ -412,20 +395,19 @@ export default function JobRunner() {
 
   return (
     <div className="fade-up">
-      <div className="page-header flex justify-between items-center">
-        <div>
-          <h2>Job Runner</h2>
-          <p>Trigger pipeline jobs and monitor live status</p>
-        </div>
-        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={loadHistory}>
-          <RefreshCw size={13} /> Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Job Runner"
+        description="Trigger pipeline jobs and monitor live status"
+        actions={
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={loadHistory}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+        }
+      />
 
       {apiError && (
-        <div className="card" style={{ marginBottom: 16, borderColor: 'var(--error)', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <AlertCircle size={14} color="var(--error)" />
-          <span style={{ fontSize: 13, color: 'var(--error)' }}>{apiError}</span>
+        <div style={{ marginBottom: 16 }}>
+          <ErrorMessage message={apiError} />
         </div>
       )}
 

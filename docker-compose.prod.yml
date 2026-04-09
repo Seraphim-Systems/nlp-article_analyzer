@@ -54,13 +54,13 @@ services:
       - proxy
     env_file: .env
     environment:
-      MONGO_URI: mongodb://mongodb:27017
-      RAW_DB_NAME: nlp_raw
-      CLEAN_DB_NAME: nlp_clean
-      CLASSIFIED_DB_NAME: nlp_classified
-      MODELS_DB_NAME: nlp_models
-      NER_DB_NAME: nlp_ner
-      NER_COLLECTION: ner_articles
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      RAW_DB_NAME: ${RAW_DB_NAME:-nlp_raw}
+      CLEAN_DB_NAME: ${CLEAN_DB_NAME:-nlp_clean}
+      CLASSIFIED_DB_NAME: ${CLASSIFIED_DB_NAME:-nlp_classified}
+      MODELS_DB_NAME: ${MODELS_DB_NAME:-nlp_models}
+      NER_DB_NAME: ${NER_DB_NAME:-nlp_ner}
+      NER_COLLECTION: ${NER_COLLECTION:-ner_articles}
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "true"
@@ -121,13 +121,13 @@ services:
       - proxy
     env_file: .env
     environment:
-      MONGO_URI: mongodb://mongodb:27017
-      RAW_DB_NAME: nlp_raw
-      CLEAN_DB_NAME: nlp_clean
-      CLASSIFIED_DB_NAME: nlp_classified
-      MODELS_DB_NAME: nlp_models
-      NER_DB_NAME: nlp_ner
-      NER_COLLECTION: ner_articles
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      RAW_DB_NAME: ${RAW_DB_NAME:-nlp_raw}
+      CLEAN_DB_NAME: ${CLEAN_DB_NAME:-nlp_clean}
+      CLASSIFIED_DB_NAME: ${CLASSIFIED_DB_NAME:-nlp_classified}
+      MODELS_DB_NAME: ${MODELS_DB_NAME:-nlp_models}
+      NER_DB_NAME: ${NER_DB_NAME:-nlp_ner}
+      NER_COLLECTION: ${NER_COLLECTION:-ner_articles}
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "false"
