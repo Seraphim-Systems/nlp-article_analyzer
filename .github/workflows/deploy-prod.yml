@@ -2,6 +2,12 @@ name: Deploy to Production
 
 on:
   workflow_dispatch:
+    inputs:
+      reset_volumes:
+        description: "If true, remove contents of <deploy_path>/data before deploying"
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   production-deploy:
@@ -9,7 +15,7 @@ jobs:
     with:
       deploy_path: "~/nlp-project"
       environment: "production"
-      reset_volumes: false
+      reset_volumes: ${{ github.event.inputs.reset_volumes || 'false' }}
     secrets:
       HETZNER_IP: ${{ secrets.HETZNER_IP }}
       HETZNER_USER: ${{ secrets.HETZNER_USER }}
