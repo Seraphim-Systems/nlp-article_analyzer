@@ -83,8 +83,15 @@ services:
       SKIP_RANK1_RECOVERY: "true"
       RUN_CLEAN_AFTER_SCRAPE: "true"
       ENGLISH_ONLY: "true"
-      OMP_NUM_THREADS: "10"
-      MKL_NUM_THREADS: "10"
+      # CPU optimization: set threads to container CPU limit (adjust if needed)
+      OMP_NUM_THREADS: "8"
+      MKL_NUM_THREADS: "8"
+      OPENBLAS_NUM_THREADS: "8"
+      VECLIB_MAXIMUM_THREADS: "8"
+      NUMEXPR_NUM_THREADS: "8"
+      # PyTorch + Transformers CPU optimization
+      PYTORCH_ENABLE_MPS_FALLBACK: "1"
+      TOKENIZERS_PARALLELISM: "false"
       NVIDIA_VISIBLE_DEVICES: "all"
     # Entrypoint handles init + bootstrap, then waits for manual job execution
     # Manually trigger jobs via: docker-compose exec jobs python scripts/run_job.py scrape

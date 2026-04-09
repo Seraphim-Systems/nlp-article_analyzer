@@ -122,13 +122,20 @@ def run(
             get_ner_collection,
             insert_ner_articles,
         )
-        from features.ner_extractor import batch_extract, get_device_label
+        from features.ner_extractor import (
+            batch_extract,
+            get_device_label,
+            get_batch_size_recommendation,
+            is_cpu_device,
+        )
         from preprocessing.ner_text_builder import build_ner_preprocessed_text
 
         init_databases()
 
         _print(INFO, "=== NER (classify) job started ===")
-        _print(INFO, f"Loading NER model... (device: {get_device_label()})")
+        device_label = get_device_label()
+        is_cpu = is_cpu_device()
+        _print(INFO, f"Loading NER model... (device: {device_label})")
 
         articles = get_unprocessed_clean_articles(limit=limit)
         _print(INFO, f"Unprocessed clean articles: {len(articles):,}")
@@ -138,17 +145,33 @@ def run(
             _print_collection_sizes()
             return result
 
-        BATCH = 64
-        FLUSH_EVERY = BATCH * 4
+        # Adaptive batch sizing: smaller batches on CPU for faster throughput
+        # Sort articles by body length for better batch composition
+        articles_sorted = sorted(
+            articles, key=lambda a: len(a.get("body", "")), reverse=True
+        )
+        _print(INFO, f"Articles sorted by size (longest first) for efficient batching")
+
+        BATCH = get_batch_size_recommendation()
+        # On CPU: flush every 1-2 batches to free memory aggressively
+        # On GPU: flush less frequently to amortize DB overhead
+        FLUSH_EVERY = BATCH if is_cpu else BATCH * 2
         pending: list[dict[str, Any]] = []
         total_written = 0
         total_entities = 0
-        batch_count = (len(articles) + BATCH - 1) // BATCH
+        batch_count = (len(articles_sorted) + BATCH - 1) // BATCH
 
-        _print(INFO, f"Batch size: {BATCH} | Total batches: {batch_count}")
+        time_estimate = batch_count * (8 if is_cpu else 3)  # rough estimate
+        _print(
+            INFO,
+            f"Batch size: {BATCH} (device-optimized) | "
+            f"Total batches: {batch_count} | "
+            f"Flush every: {FLUSH_EVERY} | "
+            f"Est. time: ~{time_estimate}s",
+        )
 
         pbar = make_pbar_simple(
-            range(0, len(articles), BATCH),
+            range(0, len(articles_sorted), BATCH),
             total=batch_count,
             desc="NER extraction",
             unit="batch",
@@ -158,7 +181,7 @@ def run(
             if _stop.is_set():
                 _print(WARN, "NER job cancelled.")
                 break
-            chunk = articles[i : i + BATCH]
+            chunk = articles_sorted[i : i + BATCH]
 
             _batch_start = time.time()
             try:
@@ -177,8 +200,14 @@ def run(
                 result["errors"].append(f"batch_extract at offset {i}: {e}")
                 continue
             _batch_duration = time.time() - _batch_start
+            batch_num = i // BATCH + 1
             logger.info(
-                "Batch %d: extracted entities in %.2fs", i // BATCH, _batch_duration
+                "Batch %d/%d: extracted %d entities in %.2fs (%.1f art/s)",
+                batch_num,
+                batch_count,
+                sum(len(a.get("entities", [])) for a in enriched_chunk),
+                _batch_duration,
+                len(chunk) / max(_batch_duration, 0.01),
             )
 
             for article in enriched_chunk:
@@ -188,18 +217,27 @@ def run(
                 )
 
             pending.extend(enriched_chunk)
-
-            if (i // BATCH) % 8 == 0 and i > 0:
-                _log(
-                    f"Progress: {articles_done:,}/{len(articles):,} articles — {total_entities:,} entities found"
-                )
-
             batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
             total_entities += batch_entities
-            articles_done = min(i + BATCH, len(articles))
+
+            # Progress logging every 3 batches or at end
+            if batch_num % 3 == 0 or batch_num == batch_count:
+                articles_done = min(i + BATCH, len(articles_sorted))
+                elapsed = time.time() - start_time
+                rate = articles_done / max(elapsed, 1)
+                eta_remaining = (len(articles_sorted) - articles_done) / max(rate, 1)
+                _log(
+                    f"Progress: {articles_done:,}/{len(articles_sorted):,} "
+                    f"({100*articles_done//len(articles_sorted)}%) | "
+                    f"Batch {batch_num}/{batch_count} ({_batch_duration:.1f}s) | "
+                    f"Entities: {total_entities:,} | "
+                    f"Flushed: {total_written:,} | "
+                    f"Rate: {rate:.1f} art/s | "
+                    f"ETA: {int(eta_remaining)}s"
+                )
 
             pbar.set_postfix(
-                arts=f"{articles_done:,}",
+                arts=f"{min(i + BATCH, len(articles_sorted)):,}",
                 ents=f"{total_entities:,}",
                 db=f"{total_written:,}",
             )
@@ -227,6 +265,12 @@ def run(
                     flushed = insert_ner_articles(pending)
                     total_written += flushed
                     pending = []
+                    logger.info(
+                        "Flushed %d articles to DB (batch %d/%d)",
+                        flushed,
+                        batch_num,
+                        batch_count,
+                    )
                 except Exception as e:
                     logger.error("insert_ner_articles failed: %s", e, exc_info=True)
                     _print(
@@ -241,15 +285,15 @@ def run(
                 total_written += flushed
             result["classified_count"] = total_written
         else:
-            result["classified_count"] = len(articles)
+            result["classified_count"] = len(articles_sorted)
 
         duration = time.time() - start_time
-        arts_per_sec = len(articles) / max(duration, 1)
+        arts_per_sec = len(articles_sorted) / max(duration, 1)
 
         _print(
             OK,
             (
-                f"NER complete | articles={len(articles):,}"
+                f"NER complete | articles={len(articles_sorted):,}"
                 f" | entities={total_entities:,}"
                 f" | written={result['classified_count']:,}"
                 f" | {arts_per_sec:.1f} art/s"
