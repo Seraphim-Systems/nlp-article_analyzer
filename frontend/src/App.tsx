@@ -48,6 +48,7 @@ function Header({ collapsed, onMobileToggle }: { collapsed: boolean; onMobileTog
           className="mobile-menu-btn"
           onClick={onMobileToggle}
           aria-label="Toggle navigation menu"
+          title="Toggle menu"
         >
           <Menu size={18} />
         </button>
@@ -103,7 +104,7 @@ const NAV = [
   { to: '/admin',    icon: <ShieldCheck size={16} />,    label: 'Evaluation' },
 ]
 
-function Sidebar({ collapsed, onToggle, mobileOpen }: { collapsed: boolean; onToggle: () => void; mobileOpen: boolean }) {
+function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: { collapsed: boolean; onToggle: () => void; mobileOpen: boolean; onMobileClose?: () => void }) {
   return (
     <nav
       className={`sidebar${mobileOpen ? ' sidebar-open' : ''}`}
@@ -180,6 +181,12 @@ function Sidebar({ collapsed, onToggle, mobileOpen }: { collapsed: boolean; onTo
           className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
           style={{ justifyContent: collapsed ? 'center' : undefined, padding: collapsed ? '10px 0' : undefined }}
           title={collapsed ? n.label : undefined}
+          onClick={() => {
+            // Close mobile menu after clicking a link
+            if (onMobileClose && mobileOpen) {
+              onMobileClose()
+            }
+          }}
         >
           {n.icon}
           {!collapsed && <span style={{ whiteSpace: 'nowrap' }}>{n.label}</span>}
@@ -204,7 +211,12 @@ export default function App() {
         style={{ gridTemplateColumns: `${collapsed ? 52 : 220}px 1fr`, transition: 'grid-template-columns 0.22s ease' }}
       >
         <Header collapsed={collapsed} onMobileToggle={() => setMobileOpen(o => !o)} />
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} mobileOpen={mobileOpen} />
+        <Sidebar 
+          collapsed={collapsed} 
+          onToggle={() => setCollapsed(c => !c)} 
+          mobileOpen={mobileOpen}
+          onMobileClose={() => setMobileOpen(false)}
+        />
         {mobileOpen && (
           <div
             className="sidebar-overlay"

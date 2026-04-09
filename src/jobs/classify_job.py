@@ -182,32 +182,54 @@ def run(
                 _print(WARN, "NER job cancelled.")
                 break
             chunk = articles_sorted[i : i + BATCH]
+            batch_num = i // BATCH + 1
+            
+            # Log batch start
+            avg_body_len = sum(len(a.get("body", "")) for a in chunk) / max(len(chunk), 1)
+            logger.info(
+                "Batch %d/%d START: %d articles (avg body: %d chars)",
+                batch_num,
+                batch_count,
+                len(chunk),
+                int(avg_body_len),
+            )
 
             _batch_start = time.time()
             try:
                 enriched_chunk = batch_extract(chunk)
             except Exception as e:
                 logger.error(
-                    "batch_extract failed on batch starting at %d: %s",
-                    i,
+                    "Batch %d/%d FAILED: batch_extract error: %s",
+                    batch_num,
+                    batch_count,
                     e,
                     exc_info=True,
                 )
                 _print(
                     f"{_YELLOW}[WARN]{_RESET}",
-                    f"batch_extract failed: {e}. Skipping batch.",
+                    f"Batch {batch_num}/{batch_count}: batch_extract failed: {e}. Skipping.",
                 )
-                result["errors"].append(f"batch_extract at offset {i}: {e}")
+                result["errors"].append(f"batch_extract at batch {batch_num}: {e}")
                 continue
             _batch_duration = time.time() - _batch_start
-            batch_num = i // BATCH + 1
+            
+            # Calculate batch metrics
+            batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
+            articles_done = min(i + BATCH, len(articles_sorted))
+            
+            # Log batch completion with full metrics
             logger.info(
-                "Batch %d/%d: extracted %d entities in %.2fs (%.1f art/s)",
+                "Batch %d/%d COMPLETE: %d articles processed | "
+                "%d entities extracted | %.2fs duration | "
+                "%.1f art/s | cumulative: %d articles, %d entities",
                 batch_num,
                 batch_count,
-                sum(len(a.get("entities", [])) for a in enriched_chunk),
+                len(chunk),
+                batch_entities,
                 _batch_duration,
                 len(chunk) / max(_batch_duration, 0.01),
+                articles_done,
+                total_entities + batch_entities,
             )
 
             for article in enriched_chunk:
@@ -217,19 +239,17 @@ def run(
                 )
 
             pending.extend(enriched_chunk)
-            batch_entities = sum(len(a.get("entities", [])) for a in enriched_chunk)
             total_entities += batch_entities
 
-            # Progress logging every 3 batches or at end
+            # Progress summary logging every 3 batches
             if batch_num % 3 == 0 or batch_num == batch_count:
-                articles_done = min(i + BATCH, len(articles_sorted))
                 elapsed = time.time() - start_time
                 rate = articles_done / max(elapsed, 1)
                 eta_remaining = (len(articles_sorted) - articles_done) / max(rate, 1)
                 _log(
+                    f"[Batch {batch_num}/{batch_count}] "
                     f"Progress: {articles_done:,}/{len(articles_sorted):,} "
                     f"({100*articles_done//len(articles_sorted)}%) | "
-                    f"Batch {batch_num}/{batch_count} ({_batch_duration:.1f}s) | "
                     f"Entities: {total_entities:,} | "
                     f"Flushed: {total_written:,} | "
                     f"Rate: {rate:.1f} art/s | "
@@ -237,7 +257,7 @@ def run(
                 )
 
             pbar.set_postfix(
-                arts=f"{min(i + BATCH, len(articles_sorted)):,}",
+                arts=f"{articles_done:,}",
                 ents=f"{total_entities:,}",
                 db=f"{total_written:,}",
             )
@@ -261,34 +281,85 @@ def run(
                 pass
 
             if not dry_run and len(pending) >= FLUSH_EVERY:
+                _flush_start = time.time()
+                pending_entities = sum(len(a.get("entities", [])) for a in pending)
                 try:
                     flushed = insert_ner_articles(pending)
                     total_written += flushed
-                    pending = []
+                    _flush_duration = time.time() - _flush_start
                     logger.info(
-                        "Flushed %d articles to DB (batch %d/%d)",
-                        flushed,
+                        "DB FLUSH (batch %d/%d): %d articles, %d entities | %.2fs | cumulative: %d written",
                         batch_num,
                         batch_count,
+                        flushed,
+                        pending_entities,
+                        _flush_duration,
+                        total_written,
                     )
+                    pending = []
                 except Exception as e:
-                    logger.error("insert_ner_articles failed: %s", e, exc_info=True)
+                    logger.error(
+                        "DB FLUSH FAILED (batch %d/%d): %d pending articles, error: %s",
+                        batch_num,
+                        batch_count,
+                        len(pending),
+                        e,
+                        exc_info=True,
+                    )
                     _print(
                         f"{_YELLOW}[WARN]{_RESET}",
-                        f"DB write failed: {e}. Continuing...",
+                        f"Batch {batch_num}: DB write failed: {e}. Continuing...",
                     )
-                    result["errors"].append(f"DB write: {e}")
+                    result["errors"].append(f"DB write at batch {batch_num}: {e}")
 
         if not dry_run:
             if pending:
-                flushed = insert_ner_articles(pending)
-                total_written += flushed
+                _final_flush_start = time.time()
+                pending_entities = sum(len(a.get("entities", [])) for a in pending)
+                try:
+                    flushed = insert_ner_articles(pending)
+                    total_written += flushed
+                    _final_flush_duration = time.time() - _final_flush_start
+                    logger.info(
+                        "DB FINAL FLUSH: %d articles, %d entities | %.2fs | total written: %d",
+                        flushed,
+                        pending_entities,
+                        _final_flush_duration,
+                        total_written,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "DB FINAL FLUSH FAILED: %d pending articles, error: %s",
+                        len(pending),
+                        e,
+                        exc_info=True,
+                    )
+                    result["errors"].append(f"DB final flush: {e}")
             result["classified_count"] = total_written
         else:
             result["classified_count"] = len(articles_sorted)
 
         duration = time.time() - start_time
         arts_per_sec = len(articles_sorted) / max(duration, 1)
+
+        # Final comprehensive logging
+        logger.info(
+            "=== NER JOB COMPLETED ===\n"
+            "Total Statistics:\n"
+            "  Articles processed: %d\n"
+            "  Total entities extracted: %d\n"
+            "  Articles written to DB: %d\n"
+            "  Total batches: %d\n"
+            "  Duration: %.2fs (%.1f art/s)\n"
+            "  Processing complete: %s",
+            len(articles_sorted),
+            total_entities,
+            result["classified_count"],
+            batch_count,
+            duration,
+            arts_per_sec,
+            "SUCCESS" if not result["errors"] else f"WITH {len(result['errors'])} ERROR(S)",
+        )
 
         _print(
             OK,
