@@ -169,37 +169,38 @@ def _promote_rank0_to_clean(limit: int = 0, batch_size: int = 500) -> int:
     )
 
     total_upserted = 0
-    processed = 0
     batch_num = 0
 
     try:
-        while processed < effective_limit:
-            batch_num += 1
-            remaining = effective_limit - processed
-            current_batch_size = min(batch_size, remaining)
+        # Fetch all Rank-0 articles at once (iterator-based to avoid memory bloat on huge sets)
+        all_rank0 = list(get_raw_articles_by_rank(0, limit=effective_limit))
+        logger.info("Fetched %d total Rank-0 articles from database.", len(all_rank0))
 
-            rank0_articles = list(get_raw_articles_by_rank(0, limit=current_batch_size))
-            if not rank0_articles:
-                logger.info("No more Rank-0 articles found.")
-                break
+        if not all_rank0:
+            logger.info("No Rank-0 articles found to promote.")
+            return 0
+
+        # Process in batches
+        for batch_start in range(0, len(all_rank0), batch_size):
+            batch_num += 1
+            batch_end = min(batch_start + batch_size, len(all_rank0))
+            batch_articles = all_rank0[batch_start:batch_end]
 
             logger.info(
-                "Enriching batch %d: %d articles (processed %d / %d total)…",
+                "Enriching batch %d: %d articles (total progress: %d / %d)…",
                 batch_num,
-                len(rank0_articles),
-                processed,
-                effective_limit,
+                len(batch_articles),
+                batch_end,
+                len(all_rank0),
             )
 
             try:
                 enriched = []
-                for i, article in enumerate(
-                    make_pbar_simple(
-                        rank0_articles,
-                        total=len(rank0_articles),
-                        desc=f"Enrich B{batch_num}",
-                        unit="art",
-                    )
+                for article in make_pbar_simple(
+                    batch_articles,
+                    total=len(batch_articles),
+                    desc=f"Enrich B{batch_num}",
+                    unit="art",
                 ):
                     try:
                         enriched.append(enrich_article_for_cleaning(article))
@@ -214,14 +215,13 @@ def _promote_rank0_to_clean(limit: int = 0, batch_size: int = 500) -> int:
                 )
                 upserted = upsert_clean_articles(enriched)
                 total_upserted += upserted
-                processed += len(rank0_articles)
 
                 logger.info(
-                    "Batch %d complete: upserted %d articles. Total progress: %d / %d",
+                    "Batch %d complete: upserted %d articles. Progress: %d / %d",
                     batch_num,
                     upserted,
-                    processed,
-                    effective_limit,
+                    batch_end,
+                    len(all_rank0),
                 )
             except Exception as e:
                 logger.error(
