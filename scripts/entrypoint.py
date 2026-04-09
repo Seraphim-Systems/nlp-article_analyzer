@@ -23,14 +23,14 @@ import time
 from datetime import datetime
 
 # ANSI colours
-_GREEN  = "\033[0;32m"
-_RED    = "\033[0;31m"
+_GREEN = "\033[0;32m"
+_RED = "\033[0;31m"
 _YELLOW = "\033[1;33m"
-_CYAN   = "\033[0;36m"
-_BOLD   = "\033[1m"
-_RESET  = "\033[0m"
+_CYAN = "\033[0;36m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
 
-OK   = f"{_GREEN}[ OK ]{_RESET}"
+OK = f"{_GREEN}[ OK ]{_RESET}"
 FAIL = f"{_RED}[FAIL]{_RESET}"
 INFO = f"{_CYAN}[INFO]{_RESET}"
 WARN = f"{_YELLOW}[WARN]{_RESET}"
@@ -58,40 +58,48 @@ def _print_stack_ready(service: str) -> None:
     print(f"\n  {_BOLD}API Endpoints{_RESET}", flush=True)
     print(f"  {sep}", flush=True)
     endpoints = [
-        ("GET",  "/",                        "API info"),
-        ("GET",  "/health",                  "Full stack health + collection counts"),
-        ("GET",  "/stats",                   "Collection sizes by pipeline stage"),
-        ("GET",  "/articles",                "Paginated articles (?collection=clean|ner&search=)"),
-        ("GET",  "/articles/ner/{url_b64}",  "Full NER detail by base64-encoded URL"),
-        ("GET",  "/compare/tfidf",           "TF-IDF: clean text vs NER-enhanced (?sample_size=200)"),
-        ("POST", "/jobs/trigger",            "Trigger a pipeline job (scrape|clean|ner|evaluate)"),
-        ("GET",  "/jobs/{id}",               "Poll job status by ID"),
-        ("GET",  "/jobs",                    "List all tracked jobs"),
-        ("GET",  "/metrics",                 "Model performance metrics (stub)"),
+        ("GET", "/", "API info"),
+        ("GET", "/health", "Full stack health + collection counts"),
+        ("GET", "/stats", "Collection sizes by pipeline stage"),
+        ("GET", "/articles", "Paginated articles (?collection=clean|ner&search=)"),
+        ("GET", "/articles/ner/{url_b64}", "Full NER detail by base64-encoded URL"),
+        (
+            "GET",
+            "/compare/tfidf",
+            "TF-IDF: clean text vs NER-enhanced (?sample_size=200)",
+        ),
+        ("POST", "/jobs/trigger", "Trigger a pipeline job (scrape|clean|ner|evaluate)"),
+        ("GET", "/jobs/{id}", "Poll job status by ID"),
+        ("GET", "/jobs", "List all tracked jobs"),
+        ("GET", "/metrics", "Model performance metrics (stub)"),
     ]
     for method, path, desc in endpoints:
         colour = _GREEN if method == "GET" else _YELLOW
-        print(f"  {colour}{method:<5}{_RESET}  {_BOLD}{path:<36}{_RESET}  {desc}", flush=True)
+        print(
+            f"  {colour}{method:<5}{_RESET}  {_BOLD}{path:<36}{_RESET}  {desc}",
+            flush=True,
+        )
 
     print(f"\n  {_BOLD}Useful Commands{_RESET}", flush=True)
     print(f"  {sep}", flush=True)
     cmds = [
-        ("Run NER job natively (MPS/GPU/CPU):",
-         "PYTHONPATH=src:. .venv/bin/python scripts/run_job.py ner"),
-        ("Run any job in Docker:",
-         "docker compose exec jobs python scripts/run_job.py {scrape|clean|ner|evaluate}"),
-        ("Export MongoDB snapshot:",
-         "./scripts/db_dump.sh"),
-        ("Import MongoDB snapshot:",
-         "./scripts/db_restore.sh ~/Downloads/nlp_mongo_dump_YYYYMMDD.tar.gz"),
-        ("Follow API logs:",
-         "docker compose logs -f api"),
-        ("Follow job logs:",
-         "docker compose logs -f jobs"),
-        ("Rebuild and restart:",
-         "docker compose up --build -d"),
-        ("Stop stack (keep data):",
-         "docker compose down"),
+        (
+            "Run NER job natively (MPS/GPU/CPU):",
+            "PYTHONPATH=src:. .venv/bin/python scripts/run_job.py ner",
+        ),
+        (
+            "Run any job in Docker:",
+            "docker compose exec jobs python scripts/run_job.py {scrape|clean|ner|evaluate}",
+        ),
+        ("Export MongoDB snapshot:", "./scripts/db_dump.sh"),
+        (
+            "Import MongoDB snapshot:",
+            "./scripts/db_restore.sh ~/Downloads/nlp_mongo_dump_YYYYMMDD.tar.gz",
+        ),
+        ("Follow API logs:", "docker compose logs -f api"),
+        ("Follow job logs:", "docker compose logs -f jobs"),
+        ("Rebuild and restart:", "docker compose up --build -d"),
+        ("Stop stack (keep data):", "docker compose down"),
     ]
     for label, cmd in cmds:
         print(f"  {_YELLOW}{label}{_RESET}", flush=True)
@@ -198,48 +206,82 @@ def bootstrap_from_kaggle() -> bool:
 
     if settings.SKIP_BOOTSTRAP:
         logger.info("Bootstrap skipped (SKIP_BOOTSTRAP=true)")
+        _status(INFO, "Bootstrap skipped (SKIP_BOOTSTRAP=true)")
         return True
 
     if not settings.KAGGLE_ENABLED:
         logger.info("Kaggle bootstrap disabled (KAGGLE_ENABLED=false)")
+        _status(INFO, "Kaggle bootstrap disabled (KAGGLE_ENABLED=false)")
         return True
 
     if not settings.KAGGLE_KEY:
-        logger.warning("Kaggle bootstrap enabled but API key not provided")
         logger.warning(
-            "  Set KAGGLE_KEY in .env to enable (modern tokens only require the key)"
+            "Kaggle bootstrap enabled but API key not provided — skipping bootstrap"
         )
+        _status(WARN, "Kaggle bootstrap enabled but KAGGLE_KEY not provided")
         return True  # Not an error, just skip
 
     _status(INFO, f"Downloading dataset: {settings.KAGGLE_DATASET}...")
+    logger.info("Kaggle bootstrap enabled, dataset=%s", settings.KAGGLE_DATASET)
 
     try:
         ingestion_result = ingest_kaggle_dataset()
 
         if ingestion_result["status"] != "success":
-            _status(FAIL, f"Kaggle ingestion failed: {ingestion_result['errors']}")
+            errors = "\n  ".join(ingestion_result.get("errors", ["Unknown error"]))
+            _status(FAIL, f"Kaggle ingestion failed:\n  {errors}")
+            logger.error(
+                "Kaggle ingestion failed with status=%s: %s",
+                ingestion_result.get("status"),
+                errors,
+            )
             return False
 
-        articles  = ingestion_result.get("inserted_articles", 0)
-        entities  = ingestion_result.get("inserted_entities", 0)
+        articles = ingestion_result.get("inserted_articles", 0)
+        entities = ingestion_result.get("inserted_entities", 0)
         sentences = ingestion_result.get("inserted_sentences", 0)
         total_inserted = articles + entities + sentences
 
-        _status(OK, f"Ingested  articles={articles}  entities={entities}  sentences={sentences}")
+        # Also log parsed counts for comparison (shows if parsing failed vs insertion failed)
+        parsed_articles = ingestion_result.get("parsed_articles", 0)
+        parsed_entities = ingestion_result.get("parsed_entities", 0)
+        parsed_sentences = ingestion_result.get("parsed_sentences", 0)
+
+        _status(
+            OK,
+            f"Bootstrap complete  inserted_articles={articles}  inserted_entities={entities}  inserted_sentences={sentences}",
+        )
+        logger.info(
+            "Kaggle ingestion complete: inserted=%d articles, %d entities, %d sentences (parsed=%d, %d, %d)",
+            articles,
+            entities,
+            sentences,
+            parsed_articles,
+            parsed_entities,
+            parsed_sentences,
+        )
 
         if total_inserted == 0:
             _status(WARN, "No documents inserted — skipping cleaning pipeline")
             return True
 
         _status(INFO, "Running cleaning pipeline...")
-        clean_result = run_cleaning_pipeline(skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY)
-        _status(OK, f"Cleaning done  promoted={clean_result.get('promoted', 0)}  discarded={clean_result.get('discarded', 0)}")
+        clean_result = run_cleaning_pipeline(
+            skip_rank1_recovery=settings.SKIP_RANK1_RECOVERY
+        )
+        _status(
+            OK,
+            f"Cleaning done  promoted={clean_result.get('promoted', 0)}  discarded={clean_result.get('discarded', 0)}",
+        )
 
         return True
 
     except Exception as e:
-        _status(FAIL, f"Bootstrap exception: {e}")
-        logger.exception("Bootstrap failed")
+        _status(FAIL, f"Bootstrap exception: {type(e).__name__}: {e}")
+        logger.exception("Bootstrap failed with exception")
+        import traceback
+
+        logger.error("Full traceback:\n%s", traceback.format_exc())
         return False
 
 
@@ -308,6 +350,7 @@ def main() -> int:
     # Validate environment before doing anything
     try:
         from config.settings import settings
+
         settings.validate()
     except EnvironmentError as e:
         print(f"\n  {FAIL} Configuration error:\n    {e}\n", flush=True)
@@ -322,6 +365,7 @@ def main() -> int:
 
     # All other modes: Run minimal init (just wait for DB)
     import os
+
     skip_heavy = os.environ.get("SKIP_SETUP_SEQUENCE", "false").lower() == "true"
     init_result = run_entrypoint_sequence(skip_bootstrap=skip_heavy)
     if init_result != 0:
