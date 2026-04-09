@@ -34,18 +34,16 @@ from database.repositories import (
     get_clean_collection,
     count_clean_articles,
     count_raw_articles_by_rank,
+    insert_job,
+    get_job_by_id,
+    list_jobs as repo_list_jobs,
+    update_job,
+    append_job_log,
+    mark_job_cancelled,
 )
 from database.connection import get_client
 
 logger = logging.getLogger(__name__)
-
-# ──────────────────────────────────────────────────────────────
-# In-memory job tracking (sufficient for single-instance dev)
-# ──────────────────────────────────────────────────────────────
-
-_jobs: dict[str, dict[str, Any]] = {}
-_jobs_lock = threading.Lock()
-
 
 # ──────────────────────────────────────────────────────────────
 # Pydantic models
@@ -257,7 +255,7 @@ async def get_stats() -> dict:
         "ner":        client[settings.NER_DB_NAME][settings.NER_COLLECTION].count_documents({}),
         "quarantine": client[settings.RAW_DB_NAME].get_collection("quarantine").count_documents({}),
         "raw_by_rank": raw_by_rank,
-        "jobs_tracked": len(_jobs),
+        "jobs_tracked": client[settings.MODELS_DB_NAME]["jobs"].count_documents({}),
     }
 
 
@@ -267,18 +265,18 @@ async def get_stats() -> dict:
 
 
 def _append_log(job_id: str, message: str) -> None:
-    with _jobs_lock:
-        if job_id in _jobs:
-            _jobs[job_id]["logs"].append(message)
+    append_job_log(job_id, message)
 
 
 def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
     """Execute a job in a background thread and record result."""
     import time as _time
-    with _jobs_lock:
-        if _jobs[job_id].get("cancel_requested"):
-            return
-        _jobs[job_id]["status"] = "running"
+
+    job = get_job_by_id(job_id)
+    if not job or job.get("cancel_requested"):
+        return
+
+    update_job(job_id, {"status": "running"})
     _start = _time.perf_counter()
     _status = "failed"
 
@@ -287,27 +285,43 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
 
     try:
         from jobs import run_job
+
         result = run_job(job_name, dry_run=dry_run, log_fn=_log)
-        with _jobs_lock:
-            if _jobs[job_id].get("cancel_requested"):
-                _status = "cancelled"
-            else:
-                _status = "success" if result.get("status") == "success" else "failed"
-            _jobs[job_id]["status"] = _status
-            _jobs[job_id]["result"] = result
+
+        # Re-check cancellation before finishing
+        latest_job = get_job_by_id(job_id)
+        if latest_job and latest_job.get("cancel_requested"):
+            _status = "cancelled"
+        else:
+            _status = "success" if result.get("status") == "success" else "failed"
+
+        update_job(
+            job_id,
+            {
+                "status": _status,
+                "result": result,
+                "finished_at": datetime.utcnow().isoformat() + "Z",
+            },
+        )
     except Exception as e:
-        with _jobs_lock:
-            if not _jobs[job_id].get("cancel_requested"):
-                _jobs[job_id]["status"] = "failed"
-                _jobs[job_id]["result"] = {"error": str(e)}
-            _status = _jobs[job_id]["status"]
+        latest_job = get_job_by_id(job_id)
+        if latest_job and not latest_job.get("cancel_requested"):
+            _status = "failed"
+            update_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "result": {"error": str(e)},
+                    "finished_at": datetime.utcnow().isoformat() + "Z",
+                },
+            )
+        else:
+            _status = "cancelled"
     finally:
         _duration = _time.perf_counter() - _start
-        with _jobs_lock:
-            if not _jobs[job_id].get("finished_at"):
-                _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
         try:
             from web.prometheus_metrics import JOB_DURATION_SECONDS, JOB_RUNS_TOTAL
+
             JOB_DURATION_SECONDS.labels(job_name=job_name, status=_status).observe(_duration)
             JOB_RUNS_TOTAL.labels(job_name=job_name, status=_status).inc()
         except Exception:
@@ -322,16 +336,16 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
     job_id = str(uuid.uuid4())[:8]
-    with _jobs_lock:
-        _jobs[job_id] = {
-            "job_id":      job_id,
-            "job_name":    request.job_name,
-            "status":      "queued",
-            "started_at":  datetime.utcnow().isoformat() + "Z",
-            "finished_at": None,
-            "result":      None,
-            "logs":        [],
-        }
+    job_doc = {
+        "job_id":      job_id,
+        "job_name":    request.job_name,
+        "status":      "queued",
+        "started_at":  datetime.utcnow().isoformat() + "Z",
+        "finished_at": None,
+        "result":      None,
+        "logs":        [],
+    }
+    insert_job(job_doc)
 
     t = threading.Thread(
         target=_run_job_thread,
@@ -351,35 +365,29 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
 @app.get("/jobs/{job_id}", tags=["jobs"], response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """Poll job status by ID."""
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-        snapshot = dict(job) if job else None
-    if not snapshot:
+    job = get_job_by_id(job_id)
+    if not job:
         raise HTTPException(404, f"Job {job_id} not found")
-    return JobStatusResponse(**snapshot)
+    return JobStatusResponse(**job)
 
 
 @app.get("/jobs", tags=["jobs"])
 async def list_jobs() -> dict:
     """List all tracked jobs (most recent first)."""
-    with _jobs_lock:
-        snapshot = [dict(j) for j in _jobs.values()]
-    jobs = sorted(snapshot, key=lambda j: j["started_at"], reverse=True)
-    return {"jobs": jobs[:50]}
+    jobs = repo_list_jobs(50)
+    return {"jobs": jobs}
 
 
 @app.post("/jobs/{job_id}/cancel", tags=["jobs"])
 async def cancel_job(job_id: str) -> dict:
     """Cancel a queued or running job."""
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-        if not job:
-            raise HTTPException(404, f"Job {job_id} not found")
-        if job["status"] not in ("queued", "running"):
-            raise HTTPException(400, f"Job {job_id} is already {job['status']}")
-        _jobs[job_id]["status"] = "cancelled"
-        _jobs[job_id]["cancel_requested"] = True
-        _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+    job = get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job["status"] not in ("queued", "running"):
+        raise HTTPException(400, f"Job {job_id} is already {job['status']}")
+
+    mark_job_cancelled(job_id)
     return {"job_id": job_id, "status": "cancelled"}
 
 

@@ -13,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def run(dry_run: bool = False, log_fn=None) -> dict[str, Any]:
+def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the cleaning job.
 
@@ -25,6 +25,8 @@ def run(dry_run: bool = False, log_fn=None) -> dict[str, Any]:
 
     Parameters
     ----------
+    limit : int
+        Maximum number of articles to process in recovery and promotion steps.
     dry_run : bool
         If True, analyze but don't update collections.
 
@@ -63,7 +65,7 @@ def run(dry_run: bool = False, log_fn=None) -> dict[str, Any]:
             from cleaning.cleaner import run_cleaning_pipeline
 
             log("Running cleaning pipeline: rank, recover, promote...")
-            summary = run_cleaning_pipeline()
+            summary = run_cleaning_pipeline(limit=limit)
             result["promoted"] = summary.get("promoted", 0)
             result["discarded"] = summary.get("discarded", 0)
             log(f"Promoted {result['promoted']:,} articles to clean collection")

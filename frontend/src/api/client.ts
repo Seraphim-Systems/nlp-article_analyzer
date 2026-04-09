@@ -154,7 +154,8 @@ export const api = {
   },
 
   nerArticle: (url: string) => {
-    const b64 = btoa(url).replace(/=/g, '')
+    // btoa doesn't handle Unicode characters; use a safer alternative
+    const b64 = btoa(unescape(encodeURIComponent(url))).replace(/=/g, '')
     return get<NERArticleDetail>(`/articles/ner/${b64}`)
   },
 

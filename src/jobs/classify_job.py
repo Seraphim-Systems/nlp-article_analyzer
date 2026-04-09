@@ -80,7 +80,7 @@ def _print_collection_sizes() -> None:
     print("", flush=True)
 
 
-def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
+def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the NER classification job.
 
@@ -120,7 +120,7 @@ def run(for_date: date | None = None, dry_run: bool = False, log_fn=None) -> dic
         _print(INFO, "=== NER (classify) job started ===")
         _print(INFO, f"Loading NER model... (device: {get_device_label()})")
 
-        articles = get_unprocessed_clean_articles()
+        articles = get_unprocessed_clean_articles(limit=limit)
         _print(INFO, f"Unprocessed clean articles: {len(articles):,}")
 
         if not articles:

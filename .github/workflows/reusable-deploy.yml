@@ -13,11 +13,11 @@ on:
         required: false
         type: string
         default: "production"
-      env_vars:
-        description: "Newline separated list of ENV_VAR=value"
+      reset_volumes:
+        description: "If true, remove contents of <deploy_path>/data before deploying"
         required: false
-        type: string
-        default: ""
+        type: boolean
+        default: false
     secrets:
       HETZNER_IP:
         required: true
@@ -27,6 +27,8 @@ on:
         required: false
       HETZNER_KEY:
         required: true
+      env_vars:
+        required: false
 
 jobs:
   deploy:
@@ -44,8 +46,14 @@ jobs:
             set -e
             echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
             
+            # Optional: reset persistent volumes/data directory
+            if [ "${{ inputs.reset_volumes }}" = "true" ]; then
+              echo "--- Resetting volumes at ${{ inputs.deploy_path }}/data ---"
+              rm -rf "${{ inputs.deploy_path }}/data"/* || true
+            fi
+            
             # 1. Prepare directory
-            mkdir -p ${{ inputs.deploy_path }}
+            mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo,prometheus,grafana}
             cd ${{ inputs.deploy_path }}
 
             # 2. Sync Code
@@ -58,7 +66,7 @@ jobs:
 
             # 3. Create .env file
             echo "--- Creating .env file ---"
-            printf "%b" "${{ inputs.env_vars }}" > .env
+            printf "%b" "${{ secrets.env_vars }}" > .env
             echo "Successfully created .env"
 
             # 4. Identify Compose File

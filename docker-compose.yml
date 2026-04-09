@@ -129,7 +129,7 @@ services:
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
       KAGGLE_ENABLED: "false"
-      SKIP_BOOTSTRAP: "false"
+      SKIP_BOOTSTRAP: "true"
     command: api
     volumes:
       - ./src:/app/src
