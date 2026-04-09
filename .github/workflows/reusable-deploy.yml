@@ -46,7 +46,19 @@ jobs:
             set -e
             echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
             
-            # Optional: reset persistent volumes/data directory and drop DBs
+            # 1. Prepare directory
+            mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo,prometheus,grafana}
+            cd ${{ inputs.deploy_path }}
+
+            # 2. Sync Code
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/${{ github.repository }}.git .
+            else
+              git fetch --all
+              git reset --hard origin/${{ github.ref_name }}
+            fi
+
+            # 3. Optional: reset persistent volumes/data directory and drop DBs (after compose files are available)
             if [ "${{ inputs.reset_volumes }}" = "true" ]; then
               echo "--- Resetting volumes at ${{ inputs.deploy_path }}/data ---"
 
@@ -78,18 +90,6 @@ jobs:
 
               # Stop the temporary mongo service so the full stack can start fresh later
               docker compose -f "$COMPOSE_FILE" down || true
-            fi
-            
-            # 1. Prepare directory
-            mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo,prometheus,grafana}
-            cd ${{ inputs.deploy_path }}
-
-            # 2. Sync Code
-            if [ ! -d ".git" ]; then
-              git clone https://github.com/${{ github.repository }}.git .
-            else
-              git fetch --all
-              git reset --hard origin/${{ github.ref_name }}
             fi
 
             # 3. Create .env file

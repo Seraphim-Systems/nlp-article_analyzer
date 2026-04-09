@@ -61,16 +61,30 @@ def ingest_kaggle_dataset(
     try:
         # Validate Kaggle credentials
         # Modern tokens only require KAGGLE_KEY; username is optional
+        logger.info("Starting Kaggle dataset ingestion...")
+        logger.info(
+            "  KAGGLE_ENABLED=%s, KAGGLE_DATASET=%s, SKIP_BOOTSTRAP=%s",
+            settings.KAGGLE_ENABLED,
+            settings.KAGGLE_DATASET,
+            settings.SKIP_BOOTSTRAP,
+        )
+
         if not settings.KAGGLE_KEY:
+            msg = "Kaggle API key not configured (KAGGLE_KEY). Modern tokens only require the key."
+            logger.error(msg)
             result["status"] = "failed"
-            result["errors"].append(
-                "Kaggle API key not configured (KAGGLE_KEY). Modern tokens only require the key, not a username."
-            )
+            result["errors"].append(msg)
             return result
+
+        logger.info(
+            "Kaggle credentials validated (key present, username=%s)",
+            settings.KAGGLE_USERNAME or "(none)",
+        )
 
         # Prepare download path
         dl_path = download_path or settings.KAGGLE_DOWNLOAD_PATH
         dl_path_obj = Path(dl_path)
+        logger.info("Creating download directory: %s", dl_path)
         dl_path_obj.mkdir(parents=True, exist_ok=True)
 
         logger.info(
@@ -80,15 +94,20 @@ def ingest_kaggle_dataset(
         # Setup Kaggle API authentication
         # Pass None for username if not configured (modern token format)
         username = settings.KAGGLE_USERNAME or None
+        logger.info("Setting up Kaggle authentication (token-based)...")
         _setup_kaggle_auth(username, settings.KAGGLE_KEY)
 
         # Download dataset
+        logger.info("Starting download from Kaggle API...")
         downloaded = _download_kaggle_dataset(settings.KAGGLE_DATASET, str(dl_path_obj))
         result["downloaded"] = downloaded
+        logger.info("Download complete: %d files retrieved", downloaded)
 
         if downloaded == 0:
+            msg = "No files downloaded from Kaggle (check API credentials and network)"
+            logger.error(msg)
             result["status"] = "failed"
-            result["errors"].append("No files downloaded from Kaggle")
+            result["errors"].append(msg)
             return result
 
         logger.info("Downloaded %d files, parsing…", downloaded)
@@ -105,11 +124,12 @@ def ingest_kaggle_dataset(
             return result
 
         logger.info(
-            "Parsed %d articles, %d entities, %d sentences; ingesting into MongoDB…",
+            "Parsing complete: %d articles, %d entities, %d sentences",
             len(articles),
             len(entities),
             len(sentences),
         )
+        logger.info("Beginning MongoDB ingestion...")
 
         # Ingest into MongoDB
         if not dry_run:
@@ -120,7 +140,18 @@ def ingest_kaggle_dataset(
             )
 
             # Ingest articles (usually a smaller number)
-            inserted_articles = insert_raw_articles(articles) if articles else 0
+            if articles:
+                logger.info(
+                    "Ingesting %d articles into nlp_raw.articles...", len(articles)
+                )
+                inserted_articles = insert_raw_articles(articles)
+                logger.info(
+                    "Articles ingestion complete: inserted=%d (duplicates skipped)",
+                    inserted_articles,
+                )
+            else:
+                inserted_articles = 0
+                logger.warning("No articles to ingest")
             result["inserted_articles"] = inserted_articles
 
             # Ingest entities in chunks (millions of records)
@@ -130,11 +161,17 @@ def ingest_kaggle_dataset(
                 total_inserted_entities = 0
                 for i in range(0, len(entities), chunk_size):
                     chunk = entities[i : i + chunk_size]
-                    total_inserted_entities += insert_entities(chunk)
+                    chunk_inserted = insert_entities(chunk)
+                    total_inserted_entities += chunk_inserted
                     if (i // chunk_size) % 10 == 0:  # Log every 100k
-                        logger.info("  Progress: %d / %d entities", i, len(entities))
+                        logger.info(
+                            "  Entities progress: %d / %d (inserted this batch: %d)",
+                            i,
+                            len(entities),
+                            chunk_inserted,
+                        )
                 result["inserted_entities"] = total_inserted_entities
-            
+
             # Ingest sentences in chunks (millions of records)
             if sentences:
                 logger.info("Ingesting %d sentences in small batches…", len(sentences))
@@ -142,9 +179,15 @@ def ingest_kaggle_dataset(
                 total_inserted_sentences = 0
                 for i in range(0, len(sentences), chunk_size):
                     chunk = sentences[i : i + chunk_size]
-                    total_inserted_sentences += insert_sentences(chunk)
+                    chunk_inserted = insert_sentences(chunk)
+                    total_inserted_sentences += chunk_inserted
                     if (i // chunk_size) % 10 == 0:  # Log every 100k
-                        logger.info("  Progress: %d / %d sentences", i, len(sentences))
+                        logger.info(
+                            "  Sentences progress: %d / %d (inserted this batch: %d)",
+                            i,
+                            len(sentences),
+                            chunk_inserted,
+                        )
                 result["inserted_sentences"] = total_inserted_sentences
 
             logger.info(
@@ -165,15 +208,27 @@ def ingest_kaggle_dataset(
             result["inserted_sentences"] = len(sentences)
 
         # Cleanup
-        logger.info("Cleaning up downloaded files…")
-        shutil.rmtree(str(dl_path_obj), ignore_errors=True)
+        logger.info("Cleaning up downloaded files from %s...", dl_path)
+        try:
+            shutil.rmtree(str(dl_path_obj), ignore_errors=True)
+            logger.info("Downloaded files cleaned up")
+        except Exception as e:
+            logger.warning("Failed to clean up downloaded files: %s", e)
 
+        logger.info(
+            "Kaggle ingestion SUCCESS: inserted %d articles, %d entities, %d sentences",
+            result["inserted_articles"],
+            result["inserted_entities"],
+            result["inserted_sentences"],
+        )
         result["status"] = "success"
 
     except Exception as e:
-        logger.exception("Kaggle dataset ingestion failed")
+        msg = f"{type(e).__name__}: {e}"
+        logger.exception("Kaggle dataset ingestion FAILED")
+        logger.error("Error details: %s", msg)
         result["status"] = "failed"
-        result["errors"].append(str(e))
+        result["errors"].append(msg)
 
     return result
 
@@ -206,24 +261,30 @@ def _download_kaggle_dataset(dataset_id: str, output_path: str) -> int:
     try:
         from kaggle.api.kaggle_api_extended import KaggleApi
 
+        logger.info("Initializing Kaggle API client...")
         api = KaggleApi()
+
+        logger.info("Authenticating with Kaggle API...")
         api.authenticate()
+        logger.info("Kaggle API authentication successful")
 
-        logger.info("Authenticated with Kaggle API")
-        logger.info("Downloading dataset: %s", dataset_id)
-
-        # Download to specified path
+        logger.info("Downloading dataset: %s to %s", dataset_id, output_path)
         api.dataset_download_files(dataset_id, path=output_path, unzip=True)
 
         # Count downloaded files
         files = list(Path(output_path).glob("**/*"))
         files = [f for f in files if f.is_file()]
 
-        logger.info("Download complete: %d files", len(files))
+        logger.info(
+            "Download complete: %d files (types: %s)",
+            len(files),
+            set(Path(f).suffix for f in files),
+        )
         return len(files)
 
     except Exception as e:
-        logger.exception("Failed to download from Kaggle")
+        logger.error("Failed to download from Kaggle: %s: %s", type(e).__name__, e)
+        logger.exception("Kaggle download traceback")
         raise
 
 
@@ -291,7 +352,9 @@ def _parse_kaggle_files(
                     continue
 
                 # Articles: have 'title' and ('url' or 'text' or '_id')
-                if "title" in record and ("text" in record or "url" in record or "_id" in record):
+                if "title" in record and (
+                    "text" in record or "url" in record or "_id" in record
+                ):
                     article = _parse_article_record(record)
                     if article:
                         articles.append(article)
@@ -329,7 +392,9 @@ def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
         # Robust URL and Title extraction
         url = str(record.get("url") or record.get("_id") or "").strip()
         title = (record.get("title") or "").strip()
-        body = (record.get("body") or record.get("text") or record.get("content") or "").strip()
+        body = (
+            record.get("body") or record.get("text") or record.get("content") or ""
+        ).strip()
 
         if not title or not body:
             return None
@@ -348,7 +413,9 @@ def _parse_article_record(record: dict[str, Any]) -> dict[str, Any] | None:
 
         # Publication date — support both legacy $date objects and plain ISO strings
         pub_date = _extract_date(record.get("pub") or record.get("publishedAt"))
-        ret_date = _extract_date(record.get("ret")) or datetime.now(timezone.utc).isoformat()
+        ret_date = (
+            _extract_date(record.get("ret")) or datetime.now(timezone.utc).isoformat()
+        )
 
         # Capture Kaggle internal ID for potential joins
         kaggle_id = record.get("_id") or record.get("id")
