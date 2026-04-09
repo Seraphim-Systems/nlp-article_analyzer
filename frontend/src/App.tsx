@@ -1,13 +1,15 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import { LayoutDashboard, FlaskConical, BarChart3, Play, Menu, Microscope } from 'lucide-react'
 import { useQuery } from './hooks/useQuery'
 import { api } from './api/client'
-import Dashboard   from './pages/Dashboard'
-import NERExplorer from './pages/NERExplorer'
-import Comparison  from './pages/Comparison'
-import JobRunner   from './pages/JobRunner'
-import Findings    from './pages/Findings'
+import { ErrorBoundary, LoadingSpinner } from './components'
+
+const Dashboard   = lazy(() => import('./pages/Dashboard'))
+const NERExplorer = lazy(() => import('./pages/NERExplorer'))
+const Comparison  = lazy(() => import('./pages/Comparison'))
+const JobRunner   = lazy(() => import('./pages/JobRunner'))
+const Findings    = lazy(() => import('./pages/Findings'))
 
 // ── Logo ───────────────────────────────────────────────────────────────────
 
@@ -192,13 +194,17 @@ export default function App() {
         <Header collapsed={collapsed} />
         <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
         <main className="main">
-          <Routes>
-            <Route path="/"         element={<Dashboard />} />
-            <Route path="/ner"      element={<NERExplorer />} />
-            <Route path="/compare"  element={<Comparison />} />
-            <Route path="/analysis" element={<Findings />} />
-            <Route path="/jobs"     element={<JobRunner />} />
-          </Routes>
+          <ErrorBoundary>
+            <Suspense fallback={<LoadingSpinner message="Loading..." />}>
+              <Routes>
+                <Route path="/"         element={<Dashboard />} />
+                <Route path="/ner"      element={<NERExplorer />} />
+                <Route path="/compare"  element={<Comparison />} />
+                <Route path="/analysis" element={<Findings />} />
+                <Route path="/jobs"     element={<JobRunner />} />
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
     </BrowserRouter>

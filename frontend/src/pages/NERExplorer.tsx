@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '../hooks/useQuery'
 import { api, NEREntity, Article } from '../api/client'
 import { Search, Tag, FileText } from 'lucide-react'
+import { LoadingSpinner, ErrorMessage, EmptyState, EntityLegend } from '../components'
 
 const ENTITY_COLORS: Record<string, string> = {
   PER: 'var(--ner-per)', ORG: 'var(--ner-org)', LOC: 'var(--ner-loc)', MISC: 'var(--ner-misc)',
@@ -160,28 +161,13 @@ function ArticleListItem({
   )
 }
 
-// ── EntityLegend ───────────────────────────────────────────────────────────
-
-function EntityLegend() {
-  return (
-    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
-      {NER_TYPES.map(k => (
-        <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: ENTITY_COLORS[k], display: 'inline-block' }} />
-          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{ENTITY_LABELS[k]}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 // ── ArticleDetail ──────────────────────────────────────────────────────────
 
 function ArticleDetail({ url, showNER }: { url: string; showNER: boolean }) {
   const { data, loading, error } = useQuery(() => api.nerArticle(url), [url])
 
-  if (loading) return <div className="loading"><div className="spinner" /> Loading article…</div>
-  if (error)   return <div style={{ color: 'var(--error)', fontSize: 13, padding: 20 }}>Error: {error}</div>
+  if (loading) return <LoadingSpinner message="Loading article..." />
+  if (error)   return <ErrorMessage message={error} />
   if (!data)   return null
 
   const { clean, ner } = data
@@ -366,11 +352,7 @@ export default function NERExplorer() {
 
         {/* Article list */}
         <div style={{ overflowY: 'auto', flex: 1 }}>
-          {loading && (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
-              <div className="spinner" />
-            </div>
-          )}
+          {loading && <LoadingSpinner size="sm" />}
           {data?.items.map(a => (
             <ArticleListItem
               key={a.url}
@@ -416,17 +398,11 @@ export default function NERExplorer() {
             <ArticleDetail url={selected} showNER={showNER} />
           </>
         ) : (
-          <div style={{
-            height: '100%', display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 10,
-            color: 'var(--text-muted)',
-          }}>
-            <FileText size={36} strokeWidth={1} opacity={0.25} />
-            <p style={{ fontSize: 13 }}>Select an article to inspect</p>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', opacity: 0.6 }}>
-              {showNER ? 'Entity spans highlighted in article body' : 'Clean article text view'}
-            </p>
-          </div>
+          <EmptyState
+            icon={<FileText size={36} strokeWidth={1} />}
+            title="Select an article to inspect"
+            description={showNER ? 'Entity spans highlighted in article body' : 'Clean article text view'}
+          />
         )}
       </div>
     </div>

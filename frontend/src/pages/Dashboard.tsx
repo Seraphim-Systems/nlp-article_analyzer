@@ -1,17 +1,7 @@
 import { useQuery } from '../hooks/useQuery'
 import { api, EntityMetrics } from '../api/client'
 import { Database, Layers, Cpu, AlertTriangle, CheckCircle, Clock, Activity } from 'lucide-react'
-import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
-} from 'recharts'
-
-function AnimatedNumber({ value }: { value: number }) {
-  return (
-    <span className="count-up" key={value}>
-      {value.toLocaleString()}
-    </span>
-  )
-}
+import { LoadingSpinner, ErrorMessage, MetricCard, PageHeader } from '../components'
 
 function PipelineFlow({ counts }: { counts: { raw: number; clean: number; ner: number } }) {
   const max = Math.max(counts.raw, 1)
@@ -104,7 +94,7 @@ function ModelPerformance() {
     <div className="card" style={{ marginTop: 16, gridColumn: '1 / -1' }}>
       <div className="card-title"><Activity size={14} /> Model Performance — BERT NER</div>
 
-      {loading && <div className="loading" style={{ padding: '20px 0' }}><div className="spinner" /></div>}
+      {loading && <LoadingSpinner size="sm" />}
       {error && <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Could not load metrics.</p>}
 
       {!loading && !hasData && (
@@ -196,10 +186,9 @@ export default function Dashboard() {
 
   return (
     <div className="fade-up">
-      <div className="page-header">
-        <h2>Observatory</h2>
-        <p>Live pipeline health — collection sizes, quality distribution, and stack status</p>
-      </div>
+      <PageHeader title="Observatory" description="Live pipeline health -- collection sizes, quality distribution, and stack status" />
+
+      {hErr && <ErrorMessage message={hErr} onRetry={() => window.location.reload()} />}
 
       {/* ── Top stats ── */}
       <div className="grid-4" style={{ marginBottom: 20 }}>
@@ -209,13 +198,14 @@ export default function Dashboard() {
           { label: 'NER Enriched',     value: stats?.ner   ?? 0, cls: 'green',  sub: 'entities extracted' },
           { label: 'Quarantined',      value: stats?.quarantine ?? 0, cls: 'gold', sub: 'rank-2 / low quality' },
         ].map((s, i) => (
-          <div className="stat-card fade-up" key={s.label} style={{ animationDelay: `${i * 60}ms` }}>
-            <div className="stat-label">{s.label}</div>
-            <div className={`stat-value ${s.cls}`}>
-              {loading ? '—' : <AnimatedNumber value={s.value} />}
-            </div>
-            <div className="stat-sub">{s.sub}</div>
-          </div>
+          <MetricCard
+            key={s.label}
+            label={s.label}
+            value={loading ? '\u2014' : s.value}
+            colorClass={s.cls}
+            sub={s.sub}
+            animationDelay={i * 60}
+          />
         ))}
       </div>
 
@@ -224,7 +214,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-title"><Layers size={14} /> Pipeline Progress</div>
           {stats && <PipelineFlow counts={{ raw: stats.raw, clean: stats.clean, ner: stats.ner }} />}
-          {loading && <div className="loading"><div className="spinner" /></div>}
+          {loading && <LoadingSpinner size="sm" />}
           <div className="divider" />
           <div className="flex justify-between items-center">
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>NER coverage of clean corpus</span>
@@ -241,7 +231,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-title"><Database size={14} /> Raw Article Quality</div>
           {stats && <RankDistribution rankData={stats.raw_by_rank} />}
-          {loading && <div className="loading"><div className="spinner" /></div>}
+          {loading && <LoadingSpinner size="sm" />}
         </div>
       </div>
 
