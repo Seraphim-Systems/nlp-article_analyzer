@@ -14,7 +14,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def run(limit: int = 0, dry_run: bool = False, log_fn=None, stop_event: threading.Event | None = None) -> dict[str, Any]:
+def run(limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the cleaning job.
 
@@ -42,7 +42,7 @@ def run(limit: int = 0, dry_run: bool = False, log_fn=None, stop_event: threadin
         - duration_seconds: execution time
     """
     log = log_fn or (lambda _: None)
-    _stop = stop_event or threading.Event()
+    _stop = threading.Event()
     start_time = time.time()
     result: dict[str, Any] = {
         "status": "success",

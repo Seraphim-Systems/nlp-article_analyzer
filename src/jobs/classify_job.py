@@ -81,7 +81,7 @@ def _print_collection_sizes() -> None:
     print("", flush=True)
 
 
-def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log_fn=None, stop_event: threading.Event | None = None) -> dict[str, Any]:
+def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log_fn=None) -> dict[str, Any]:
     """
     Execute the NER classification job.
 
@@ -90,7 +90,7 @@ def run(for_date: date | None = None, limit: int = 0, dry_run: bool = False, log
     """
     import re as _re
     _log = log_fn or (lambda _: None)
-    _stop = stop_event or threading.Event()
+    _stop = threading.Event()
 
     def _print(tag: str, msg: str) -> None:
         print(f"  {tag} {msg}", flush=True)

@@ -65,11 +65,11 @@ def run_job(
     elif job_name == "clean":
         from jobs.clean_job import run as clean_run
 
-        return clean_run(limit=limit, dry_run=dry_run, log_fn=_log, stop_event=_stop)
+        return clean_run(limit=limit, dry_run=dry_run, log_fn=_log)
     elif job_name in ("classify", "ner"):
         from jobs.classify_job import run as classify_run
 
-        return classify_run(for_date=for_date, limit=limit, dry_run=dry_run, log_fn=_log, stop_event=_stop)
+        return classify_run(for_date=for_date, limit=limit, dry_run=dry_run, log_fn=_log)
     elif job_name == "evaluate":
         from jobs.evaluate_job import run as evaluate_run
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import sys
-import threading
 import types
 
 import pytest
@@ -55,14 +54,6 @@ from fastapi.testclient import TestClient
 # Fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(autouse=True)
-def clear_stop_events():
-    from web import app as web_app
-    with web_app._stop_events_lock:
-        web_app._stop_events.clear()
-    yield
-    with web_app._stop_events_lock:
-        web_app._stop_events.clear()
 
 
 @pytest.fixture()
@@ -258,21 +249,17 @@ class TestListJobs:
 
 class TestCancelJob:
     def test_cancel_queued(self, client):
-        from web import app as web_app
-        stop_event = threading.Event()
-        with web_app._stop_events_lock:
-            web_app._stop_events["c1"] = stop_event
         job_doc = {
             "job_id": "c1", "job_name": "scrape", "status": "queued",
             "started_at": "2024-01-01T00:00:00Z", "finished_at": None,
             "result": None, "logs": [],
         }
         with patch("web.app.get_job_by_id", return_value=job_doc), \
-             patch("web.app.mark_job_cancelled"):
+             patch("web.app.mark_job_cancelled") as mock_cancel:
             r = client.post("/jobs/c1/cancel")
         assert r.status_code == 200
         assert r.json()["status"] == "cancelled"
-        assert stop_event.is_set()
+        mock_cancel.assert_called_once_with("c1")
 
     def test_cancel_already_cancelled(self, client):
         job_doc = {

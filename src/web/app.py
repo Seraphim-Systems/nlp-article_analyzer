@@ -263,15 +263,13 @@ async def get_stats() -> dict:
 # Jobs
 # ──────────────────────────────────────────────────────────────
 
-_stop_events: dict[str, threading.Event] = {}
-_stop_events_lock = threading.Lock()
 
 
 def _append_log(job_id: str, message: str) -> None:
     append_job_log(job_id, message)
 
 
-def _run_job_thread(job_id: str, job_name: str, dry_run: bool, stop_event: threading.Event) -> None:
+def _run_job_thread(job_id: str, job_name: str, dry_run: bool) -> None:
     """Execute a job in a background thread and record result."""
     import time as _time
 
@@ -289,7 +287,8 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool, stop_event: threa
     try:
         from jobs import run_job
 
-        result = run_job(job_name, dry_run=dry_run, log_fn=_log, stop_event=stop_event)
+        result = run_job(job_name, dry_run=dry_run, log_fn=_log)
+
 
         latest_job = get_job_by_id(job_id)
         if latest_job and latest_job.get("cancel_requested"):
@@ -338,9 +337,6 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
     job_id = str(uuid.uuid4())[:8]
-    stop_event = threading.Event()
-    with _stop_events_lock:
-        _stop_events[job_id] = stop_event
     job_doc = {
         "job_id":      job_id,
         "job_name":    request.job_name,
@@ -354,7 +350,7 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
 
     t = threading.Thread(
         target=_run_job_thread,
-        args=(job_id, request.job_name, request.dry_run, stop_event),
+        args=(job_id, request.job_name, request.dry_run),
         daemon=True,
     )
     t.start()
@@ -392,10 +388,6 @@ async def cancel_job(job_id: str) -> dict:
     if job["status"] not in ("queued", "running"):
         raise HTTPException(400, f"Job {job_id} is already {job['status']}")
 
-    with _stop_events_lock:
-        ev = _stop_events.get(job_id)
-    if ev:
-        ev.set()
     mark_job_cancelled(job_id)
     return {"job_id": job_id, "status": "cancelled"}
 

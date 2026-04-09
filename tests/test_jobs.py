@@ -190,13 +190,6 @@ def test_clean_job_dry_run(mock_init):
     assert result["status"] == "success"
 
 
-@patch("database.init_db.init_databases")
-def test_clean_job_stop_event_cancels(mock_init):
-    ev = threading.Event()
-    ev.set()
-    result = jobs.clean_job.run(stop_event=ev)
-    assert result["status"] == "cancelled"
-
 
 @patch("cleaning.cleaner.run_cleaning_pipeline", side_effect=RuntimeError("pipe fail"))
 @patch("database.init_db.init_databases")
@@ -295,25 +288,6 @@ def test_classify_dry_run(mock_pbar, mock_init, mock_get, mock_insert,
     result = jobs.classify_job.run(dry_run=True)
     assert result["classified_count"] == 2
     mock_insert.assert_not_called()
-
-
-@patch.object(jobs.classify_job, "_print_collection_sizes")
-@patch("preprocessing.ner_text_builder.build_ner_preprocessed_text", return_value="preprocessed")
-@patch("features.ner_extractor.batch_extract", side_effect=lambda chunk: chunk)
-@patch("features.ner_extractor.get_device_label", return_value="cpu")
-@patch("database.repositories.get_ner_collection")
-@patch("database.repositories.get_clean_collection")
-@patch("database.repositories.insert_ner_articles", return_value=0)
-@patch("database.repositories.get_unprocessed_clean_articles", return_value=[_make_article(0)])
-@patch("database.init_db.init_databases")
-@patch("utils.progress.make_pbar_simple", side_effect=_fake_make_pbar)
-def test_classify_stop_event_breaks_early(mock_pbar, mock_init, mock_get, mock_insert,
-                                           mock_clean_col, mock_ner_col,
-                                           mock_device, mock_extract, mock_build, mock_sizes):
-    ev = threading.Event()
-    ev.set()
-    result = jobs.classify_job.run(stop_event=ev)
-    assert result["status"] == "success"
 
 
 @patch.object(jobs.classify_job, "_print_collection_sizes")
