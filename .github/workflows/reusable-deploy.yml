@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: "production"
+      reset_volumes:
+        description: "If true, remove contents of <deploy_path>/data before deploying"
+        required: false
+        type: boolean
+        default: false
     secrets:
       HETZNER_IP:
         required: true
@@ -40,6 +45,12 @@ jobs:
           script: |
             set -e
             echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
+            
+            # Optional: reset persistent volumes/data directory
+            if [ "${{ inputs.reset_volumes }}" = "true" ]; then
+              echo "--- Resetting volumes at ${{ inputs.deploy_path }}/data ---"
+              rm -rf "${{ inputs.deploy_path }}/data"/* || true
+            fi
             
             # 1. Prepare directory
             mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo,prometheus,grafana}
