@@ -62,8 +62,8 @@ services:
       NER_COLLECTION: ner_articles
       PYTHONUNBUFFERED: "1"
       LOG_LEVEL: INFO
-      KAGGLE_ENABLED: "false"
-      SKIP_BOOTSTRAP: "true"
+      KAGGLE_ENABLED: "true"
+      SKIP_BOOTSTRAP: "false"
     command: wait
     volumes:
       - ./data/hf_cache:/root/.cache/huggingface
