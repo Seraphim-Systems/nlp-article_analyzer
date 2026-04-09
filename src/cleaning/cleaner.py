@@ -154,29 +154,108 @@ def _process_rank1(limit: int = 0, batch_size: int = 1000) -> None:
     )
 
 
-def _promote_rank0_to_clean(limit: int = 0) -> int:
-    """Copy all Rank-0 raw articles to the clean collection."""
-    rank0_articles = list(get_raw_articles_by_rank(0, limit=limit))
-    if not rank0_articles:
+def _promote_rank0_to_clean(limit: int = 0, batch_size: int = 500) -> int:
+    """Copy all Rank-0 raw articles to the clean collection in batches."""
+    total_rank0 = get_raw_collection().count_documents({"rank": 0})
+    if total_rank0 == 0:
         logger.info("No Rank-0 articles to promote.")
         return 0
 
-    enriched = [enrich_article_for_cleaning(a) for a in rank0_articles]
-    upserted = upsert_clean_articles(enriched)
-    logger.info("Promoted %d Rank-0 articles to clean collection.", upserted)
-    return upserted
+    effective_limit = limit if limit > 0 else total_rank0
+    logger.info(
+        "Promoting %d Rank-0 articles to clean collection (batch_size=%d)…",
+        min(effective_limit, total_rank0),
+        batch_size,
+    )
+
+    total_upserted = 0
+    processed = 0
+    batch_num = 0
+
+    try:
+        while processed < effective_limit:
+            batch_num += 1
+            remaining = effective_limit - processed
+            current_batch_size = min(batch_size, remaining)
+
+            rank0_articles = list(get_raw_articles_by_rank(0, limit=current_batch_size))
+            if not rank0_articles:
+                logger.info("No more Rank-0 articles found.")
+                break
+
+            logger.info(
+                "Enriching batch %d: %d articles (processed %d / %d total)…",
+                batch_num,
+                len(rank0_articles),
+                processed,
+                effective_limit,
+            )
+
+            try:
+                enriched = []
+                for i, article in enumerate(
+                    make_pbar_simple(
+                        rank0_articles,
+                        total=len(rank0_articles),
+                        desc=f"Enrich B{batch_num}",
+                        unit="art",
+                    )
+                ):
+                    try:
+                        enriched.append(enrich_article_for_cleaning(article))
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to enrich article %s: %s", article.get("url"), e
+                        )
+                        continue
+
+                logger.info(
+                    "Upserting %d enriched articles to clean collection…", len(enriched)
+                )
+                upserted = upsert_clean_articles(enriched)
+                total_upserted += upserted
+                processed += len(rank0_articles)
+
+                logger.info(
+                    "Batch %d complete: upserted %d articles. Total progress: %d / %d",
+                    batch_num,
+                    upserted,
+                    processed,
+                    effective_limit,
+                )
+            except Exception as e:
+                logger.error(
+                    "Error during batch %d enrichment: %s", batch_num, e, exc_info=True
+                )
+                raise
+
+        logger.info(
+            "Promotion complete: %d Rank-0 articles upserted to clean collection (%d batches).",
+            total_upserted,
+            batch_num,
+        )
+        return total_upserted
+    except Exception as e:
+        logger.error("Rank-0 promotion FAILED: %s", e, exc_info=True)
+        raise
 
 
 def _quarantine_rank2() -> int:
     """Store Rank-2 articles in quarantine for audit/recovery."""
-    rank2_articles = list(get_raw_articles_by_rank(2))
-    if not rank2_articles:
+    rank2_count = get_raw_collection().count_documents({"rank": 2})
+    if rank2_count == 0:
         logger.info("No Rank-2 articles to quarantine.")
         return 0
 
-    quarantined = upsert_quarantine_articles(rank2_articles)
-    logger.info("Quarantined %d Rank-2 articles.", quarantined)
-    return quarantined
+    logger.info("Quarantining %d Rank-2 articles…", rank2_count)
+    try:
+        rank2_articles = list(get_raw_articles_by_rank(2))
+        quarantined = upsert_quarantine_articles(rank2_articles)
+        logger.info("Quarantined %d Rank-2 articles.", quarantined)
+        return quarantined
+    except Exception as e:
+        logger.error("Quarantine FAILED: %s", e, exc_info=True)
+        raise
 
 
 def run_cleaning_pipeline(
@@ -205,31 +284,48 @@ def run_cleaning_pipeline(
     """
     logger.info("=== Cleaning pipeline started ===")
 
-    # Step 1: rank new articles
-    _rank_unranked_articles()
+    try:
+        # Step 1: rank new articles
+        logger.info("Step 1: Ranking unranked articles…")
+        _rank_unranked_articles()
+        logger.info("✓ Step 1 complete")
 
-    # Step 2: try to recover rank-1 (skippable)
-    if skip_rank1_recovery:
-        logger.info("Skipping Rank-1 URL recovery (skip_rank1_recovery=True)")
-    else:
-        effective_rank1_limit = rank1_limit if rank1_limit > 0 else limit
-        _process_rank1(limit=effective_rank1_limit)
+        # Step 2: try to recover rank-1 (skippable)
+        logger.info("Step 2: Processing Rank-1 articles…")
+        if skip_rank1_recovery:
+            logger.info("Skipping Rank-1 URL recovery (skip_rank1_recovery=True)")
+        else:
+            effective_rank1_limit = rank1_limit if rank1_limit > 0 else limit
+            _process_rank1(limit=effective_rank1_limit)
+        logger.info("✓ Step 2 complete")
 
-    # Step 3: promote rank-0 to clean DB
-    promoted = _promote_rank0_to_clean(limit=limit)
+        # Step 3: promote rank-0 to clean DB
+        logger.info("Step 3: Promoting Rank-0 articles to clean collection…")
+        promoted = _promote_rank0_to_clean(limit=limit)
+        logger.info("✓ Step 3 complete: %d articles promoted", promoted)
 
-    # Step 4: quarantine rank-2 for auditing / future recovery
-    discarded = _quarantine_rank2()
+        # Step 4: quarantine rank-2 for auditing / future recovery
+        logger.info("Step 4: Quarantining Rank-2 articles…")
+        discarded = _quarantine_rank2()
+        logger.info("✓ Step 4 complete: %d articles quarantined", discarded)
 
-    # Summary
-    rank_counts = count_raw_articles_by_rank()
-    logger.info(
-        "=== Cleaning pipeline finished | Distribution after clean: %s ===",
-        rank_counts,
-    )
+        # Summary
+        rank_counts = count_raw_articles_by_rank()
+        logger.info(
+            "=== Cleaning pipeline FINISHED | Distribution after clean: %s ===",
+            rank_counts,
+        )
 
-    return {
-        "promoted": promoted,
-        "discarded": discarded,
-        "rank_distribution": rank_counts,
-    }
+        return {
+            "promoted": promoted,
+            "discarded": discarded,
+            "rank_distribution": rank_counts,
+        }
+    except Exception as e:
+        logger.error("=== Cleaning pipeline FAILED: %s ===", e, exc_info=True)
+        rank_counts = count_raw_articles_by_rank()
+        logger.error(
+            "Pipeline failed at unknown step. Current rank distribution: %s",
+            rank_counts,
+        )
+        raise
