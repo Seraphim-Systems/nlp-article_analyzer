@@ -64,9 +64,10 @@ def test_extract_entities_multiple_entities():
     assert result[1]["label"] == "LOC"
 
 
-def test_extract_entities_truncates_long_text():
-    """Text exceeding 512 words should be truncated before inference."""
-    long_text = " ".join(["word"] * 600)
+def test_extract_entities_long_text_uses_chunking():
+    """Text exceeding _CHUNK_WORDS is split into overlapping chunks, not truncated."""
+    from features.ner_extractor import _CHUNK_WORDS
+    long_text = " ".join(["word"] * (_CHUNK_WORDS + 50))
     captured = []
 
     def mock_pipeline(text):
@@ -76,12 +77,17 @@ def test_extract_entities_truncates_long_text():
     with patch("features.ner_extractor._get_pipeline", return_value=mock_pipeline):
         extract_entities(long_text)
 
-    sent = captured[0]
-    assert len(sent.split()) == 512
+    # Multiple chunks should have been processed
+    assert len(captured) > 1
+    # No single chunk exceeds _CHUNK_WORDS
+    for chunk in captured:
+        assert len(chunk.split()) <= _CHUNK_WORDS
 
 
-def test_extract_entities_no_truncation_under_512():
-    text = " ".join(["word"] * 100)
+def test_extract_entities_short_text_single_call():
+    """Text under _CHUNK_WORDS is passed to the pipeline as-is in one call."""
+    from features.ner_extractor import _CHUNK_WORDS
+    text = " ".join(["word"] * (_CHUNK_WORDS - 10))
     captured = []
 
     def mock_pipeline(t):
@@ -91,6 +97,7 @@ def test_extract_entities_no_truncation_under_512():
     with patch("features.ner_extractor._get_pipeline", return_value=mock_pipeline):
         extract_entities(text)
 
+    assert len(captured) == 1
     assert captured[0] == text
 
 
