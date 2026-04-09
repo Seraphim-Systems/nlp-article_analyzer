@@ -57,12 +57,12 @@ def _rank_unranked_articles() -> None:
     logger.info("Ranking complete.")
 
 
-def _process_rank1() -> None:
+def _process_rank1(limit: int = 0) -> None:
     """
     Attempt to recover Rank-1 articles by re-fetching their URLs.
     Updates the DB fields and re-assigns rank.
     """
-    rank1_articles = list(get_raw_articles_by_rank(1))
+    rank1_articles = list(get_raw_articles_by_rank(1, limit=limit))
     if not rank1_articles:
         logger.info("No Rank-1 articles to process.")
         return
@@ -93,9 +93,9 @@ def _process_rank1() -> None:
     logger.info("Rank-1 processing done: %d articles promoted to Rank 0.", promoted)
 
 
-def _promote_rank0_to_clean() -> int:
+def _promote_rank0_to_clean(limit: int = 0) -> int:
     """Copy all Rank-0 raw articles to the clean collection."""
-    rank0_articles = list(get_raw_articles_by_rank(0))
+    rank0_articles = list(get_raw_articles_by_rank(0, limit=limit))
     if not rank0_articles:
         logger.info("No Rank-0 articles to promote.")
         return 0
@@ -118,7 +118,7 @@ def _quarantine_rank2() -> int:
     return quarantined
 
 
-def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
+def run_cleaning_pipeline(skip_rank1_recovery: bool = False, limit: int = 0) -> dict[str, int]:
     """
     Execute the full cleaning pipeline.
 
@@ -127,6 +127,8 @@ def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
     skip_rank1_recovery : bool
         If True, skip the URL re-fetch step for Rank-1 articles.
         Useful for large historical datasets where most URLs are dead.
+    limit : int
+        Maximum number of articles to process in recovery and promotion steps.
 
     Returns a summary dict:
     {
@@ -144,10 +146,10 @@ def run_cleaning_pipeline(skip_rank1_recovery: bool = False) -> dict[str, int]:
     if skip_rank1_recovery:
         logger.info("Skipping Rank-1 URL recovery (skip_rank1_recovery=True)")
     else:
-        _process_rank1()
+        _process_rank1(limit=limit)
 
     # Step 3: promote rank-0 to clean DB
-    promoted = _promote_rank0_to_clean()
+    promoted = _promote_rank0_to_clean(limit=limit)
 
     # Step 4: quarantine rank-2 for auditing / future recovery
     discarded = _quarantine_rank2()

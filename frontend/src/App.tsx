@@ -1,15 +1,16 @@
 import { useState, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import { LayoutDashboard, FlaskConical, BarChart3, Play, Menu, Microscope } from 'lucide-react'
+import { LayoutDashboard, FlaskConical, BarChart3, Play, Menu, Microscope, ShieldCheck } from 'lucide-react'
 import { useQuery } from './hooks/useQuery'
 import { api } from './api/client'
 import { ErrorBoundary, LoadingSpinner } from './components'
 
-const Dashboard   = lazy(() => import('./pages/Dashboard'))
-const NERExplorer = lazy(() => import('./pages/NERExplorer'))
-const Comparison  = lazy(() => import('./pages/Comparison'))
-const JobRunner   = lazy(() => import('./pages/JobRunner'))
-const Findings    = lazy(() => import('./pages/Findings'))
+const Dashboard         = lazy(() => import('./pages/Dashboard'))
+const NERExplorer       = lazy(() => import('./pages/NERExplorer'))
+const Comparison        = lazy(() => import('./pages/Comparison'))
+const JobRunner         = lazy(() => import('./pages/JobRunner'))
+const Findings          = lazy(() => import('./pages/Findings'))
+const EvaluationMetrics = lazy(() => import('./pages/EvaluationMetrics'))
 
 // ── Logo ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,7 @@ const NAV = [
   { to: '/compare',  icon: <BarChart3 size={16} />,       label: 'TF-IDF Compare' },
   { to: '/analysis', icon: <Microscope size={16} />,      label: 'Analysis' },
   { to: '/jobs',     icon: <Play size={16} />,            label: 'Job Runner' },
+  { to: '/admin',    icon: <ShieldCheck size={16} />,    label: 'Evaluation' },
 ]
 
 function Sidebar({ collapsed, onToggle, mobileOpen }: { collapsed: boolean; onToggle: () => void; mobileOpen: boolean }) {
@@ -219,6 +221,7 @@ export default function App() {
                 <Route path="/compare"  element={<Comparison />} />
                 <Route path="/analysis" element={<Findings />} />
                 <Route path="/jobs"     element={<JobRunner />} />
+                <Route path="/admin"    element={<EvaluationMetrics />} />
               </Routes>
             </Suspense>
           </ErrorBoundary>

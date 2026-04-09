@@ -34,18 +34,16 @@ from database.repositories import (
     get_clean_collection,
     count_clean_articles,
     count_raw_articles_by_rank,
+    insert_job,
+    get_job_by_id,
+    list_jobs as repo_list_jobs,
+    update_job,
+    append_job_log,
+    mark_job_cancelled,
 )
 from database.connection import get_client
 
 logger = logging.getLogger(__name__)
-
-# ──────────────────────────────────────────────────────────────
-# In-memory job tracking (sufficient for single-instance dev)
-# ──────────────────────────────────────────────────────────────
-
-_jobs: dict[str, dict[str, Any]] = {}
-_jobs_lock = threading.Lock()
-
 
 # ──────────────────────────────────────────────────────────────
 # Pydantic models
@@ -108,11 +106,15 @@ class MetricsResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     model_version: str | None = None
     last_updated: str | None = None
+    # CoNLL-2003 NER quality (secondary — model validation)
     precision: float | None = None
     recall: float | None = None
     f1: float | None = None
     per_entity: dict[str, dict] | None = None
     sample_size: int | None = None
+    benchmark: str | None = None
+    # Separability (primary — research evaluation)
+    separability: dict | None = None
 
 
 # ──────────────────────────────────────────────────────────────
@@ -253,7 +255,7 @@ async def get_stats() -> dict:
         "ner":        client[settings.NER_DB_NAME][settings.NER_COLLECTION].count_documents({}),
         "quarantine": client[settings.RAW_DB_NAME].get_collection("quarantine").count_documents({}),
         "raw_by_rank": raw_by_rank,
-        "jobs_tracked": len(_jobs),
+        "jobs_tracked": client[settings.MODELS_DB_NAME]["jobs"].count_documents({}),
     }
 
 
@@ -261,20 +263,25 @@ async def get_stats() -> dict:
 # Jobs
 # ──────────────────────────────────────────────────────────────
 
+# In-memory stop events — only lives as long as the process, but that's
+# enough: cancellation signals are only needed for running threads.
+_stop_events: dict[str, threading.Event] = {}
+_stop_events_lock = threading.Lock()
+
 
 def _append_log(job_id: str, message: str) -> None:
-    with _jobs_lock:
-        if job_id in _jobs:
-            _jobs[job_id]["logs"].append(message)
+    append_job_log(job_id, message)
 
 
 def _run_job_thread(job_id: str, job_name: str, dry_run: bool, stop_event: threading.Event) -> None:
     """Execute a job in a background thread and record result."""
     import time as _time
-    with _jobs_lock:
-        if stop_event.is_set():
-            return
-        _jobs[job_id]["status"] = "running"
+
+    job = get_job_by_id(job_id)
+    if not job or job.get("cancel_requested"):
+        return
+
+    update_job(job_id, {"status": "running"})
     _start = _time.perf_counter()
     _status = "failed"
 
@@ -283,26 +290,42 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool, stop_event: threa
 
     try:
         from jobs import run_job
+
         result = run_job(job_name, dry_run=dry_run, log_fn=_log, stop_event=stop_event)
-        with _jobs_lock:
-            _status = "cancelled" if stop_event.is_set() else (
-                "success" if result.get("status") == "success" else "failed"
-            )
-            _jobs[job_id]["status"] = _status
-            _jobs[job_id]["result"] = result
+
+        latest_job = get_job_by_id(job_id)
+        if latest_job and latest_job.get("cancel_requested"):
+            _status = "cancelled"
+        else:
+            _status = "success" if result.get("status") == "success" else "failed"
+
+        update_job(
+            job_id,
+            {
+                "status": _status,
+                "result": result,
+                "finished_at": datetime.utcnow().isoformat() + "Z",
+            },
+        )
     except Exception as e:
-        with _jobs_lock:
-            _status = "cancelled" if stop_event.is_set() else "failed"
-            _jobs[job_id]["status"] = _status
-            if _status == "failed":
-                _jobs[job_id]["result"] = {"error": str(e)}
+        latest_job = get_job_by_id(job_id)
+        if latest_job and not latest_job.get("cancel_requested"):
+            _status = "failed"
+            update_job(
+                job_id,
+                {
+                    "status": "failed",
+                    "result": {"error": str(e)},
+                    "finished_at": datetime.utcnow().isoformat() + "Z",
+                },
+            )
+        else:
+            _status = "cancelled"
     finally:
         _duration = _time.perf_counter() - _start
-        with _jobs_lock:
-            if not _jobs[job_id].get("finished_at"):
-                _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
         try:
             from web.prometheus_metrics import JOB_DURATION_SECONDS, JOB_RUNS_TOTAL
+
             JOB_DURATION_SECONDS.labels(job_name=job_name, status=_status).observe(_duration)
             JOB_RUNS_TOTAL.labels(job_name=job_name, status=_status).inc()
         except Exception:
@@ -318,17 +341,18 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
 
     job_id = str(uuid.uuid4())[:8]
     stop_event = threading.Event()
-    with _jobs_lock:
-        _jobs[job_id] = {
-            "job_id":      job_id,
-            "job_name":    request.job_name,
-            "status":      "queued",
-            "started_at":  datetime.utcnow().isoformat() + "Z",
-            "finished_at": None,
-            "result":      None,
-            "logs":        [],
-            "_stop_event": stop_event,
-        }
+    with _stop_events_lock:
+        _stop_events[job_id] = stop_event
+    job_doc = {
+        "job_id":      job_id,
+        "job_name":    request.job_name,
+        "status":      "queued",
+        "started_at":  datetime.utcnow().isoformat() + "Z",
+        "finished_at": None,
+        "result":      None,
+        "logs":        [],
+    }
+    insert_job(job_doc)
 
     t = threading.Thread(
         target=_run_job_thread,
@@ -348,36 +372,33 @@ async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
 @app.get("/jobs/{job_id}", tags=["jobs"], response_model=JobStatusResponse)
 async def get_job_status(job_id: str) -> JobStatusResponse:
     """Poll job status by ID."""
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-        snapshot = dict(job) if job else None
-    if not snapshot:
+    job = get_job_by_id(job_id)
+    if not job:
         raise HTTPException(404, f"Job {job_id} not found")
-    snapshot.pop("_stop_event", None)
-    return JobStatusResponse(**snapshot)
+    return JobStatusResponse(**job)
 
 
 @app.get("/jobs", tags=["jobs"])
 async def list_jobs() -> dict:
     """List all tracked jobs (most recent first)."""
-    with _jobs_lock:
-        snapshot = [{k: v for k, v in j.items() if k != "_stop_event"} for j in _jobs.values()]
-    jobs = sorted(snapshot, key=lambda j: j["started_at"], reverse=True)
-    return {"jobs": jobs[:50]}
+    jobs = repo_list_jobs(50)
+    return {"jobs": jobs}
 
 
 @app.post("/jobs/{job_id}/cancel", tags=["jobs"])
 async def cancel_job(job_id: str) -> dict:
     """Cancel a queued or running job."""
-    with _jobs_lock:
-        job = _jobs.get(job_id)
-        if not job:
-            raise HTTPException(404, f"Job {job_id} not found")
-        if job["status"] not in ("queued", "running"):
-            raise HTTPException(400, f"Job {job_id} is already {job['status']}")
-        _jobs[job_id]["_stop_event"].set()
-        _jobs[job_id]["status"] = "cancelled"
-        _jobs[job_id]["finished_at"] = datetime.utcnow().isoformat() + "Z"
+    job = get_job_by_id(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    if job["status"] not in ("queued", "running"):
+        raise HTTPException(400, f"Job {job_id} is already {job['status']}")
+
+    with _stop_events_lock:
+        ev = _stop_events.get(job_id)
+    if ev:
+        ev.set()
+    mark_job_cancelled(job_id)
     return {"job_id": job_id, "status": "cancelled"}
 
 
@@ -645,7 +666,7 @@ async def separability_analysis(
 
 @app.get("/metrics", tags=["metrics"], response_model=MetricsResponse)
 async def get_metrics() -> MetricsResponse:
-    """Return the latest NER evaluation metrics, or empty response if none exist yet."""
+    """Return the latest evaluation results (separability + CoNLL-2003 NER quality)."""
     from evaluation.sample_loader import load_latest_run_metrics
 
     run = load_latest_run_metrics()
@@ -661,11 +682,13 @@ async def get_metrics() -> MetricsResponse:
     return MetricsResponse(
         model_version=run.get("model_version"),
         last_updated=run.get("created_at"),
-        precision=overall.get("precision"),
-        recall=overall.get("recall"),
-        f1=overall.get("f1"),
-        per_entity=per_entity,
-        sample_size=run.get("training_set_size"),
+        precision=overall.get("precision") or None,
+        recall=overall.get("recall") or None,
+        f1=overall.get("f1") or None,
+        per_entity=per_entity or None,
+        sample_size=run.get("conll_sample_size") or run.get("training_set_size"),
+        benchmark=run.get("benchmark"),
+        separability=run.get("separability"),
     )
 
 

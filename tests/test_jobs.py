@@ -336,69 +336,66 @@ def test_classify_batch_extract_raises(mock_pbar, mock_init, mock_get, mock_inse
 
 # ── evaluate_job.run() ───────────────────────────────────────────────────────
 
-@patch("evaluation.sample_loader.load_ner_sample", return_value=[])
+_SEP_RESULT = {
+    "improvement_pct": 5.0,
+    "verdict": "NER_BETTER",
+    "sample_size": 10,
+    "mean_sim_clean": 0.4,
+    "mean_sim_ner": 0.35,
+}
+
+_CONLL_RESULT = {
+    "precision": 0.9,
+    "recall": 0.85,
+    "f1": 0.87,
+    "sample_size": 5,
+    "benchmark": "conll2003",
+    "per_entity": {"PER": {"precision": 0.9, "recall": 0.85, "f1": 0.87, "support": 5}},
+}
+
+
+@patch("evaluation.separability_eval.compute_separability", return_value=_SEP_RESULT)
 @patch("database.init_db.init_databases")
-def test_evaluate_no_articles(mock_init, mock_load):
-    result = jobs.evaluate_job.run()
+def test_evaluate_no_articles(mock_init, mock_sep):
+    result = jobs.evaluate_job.run(dry_run=True)
     assert result["status"] == "success"
-    assert result["sample_size"] == 0
+    assert result["separability"] is not None
 
 
 @patch("database.repositories.insert_model_run", return_value="abc123")
-@patch("evaluation.compute_ner_metrics")
-@patch("features.ner_extractor.batch_extract", side_effect=lambda x: x)
-@patch("evaluation.sample_loader.load_ner_sample")
+@patch("evaluation.conll_eval.run_conll_eval", return_value=_CONLL_RESULT)
+@patch("evaluation.separability_eval.compute_separability", return_value=_SEP_RESULT)
 @patch("database.init_db.init_databases")
-def test_evaluate_happy_path(mock_init, mock_load, mock_extract, mock_metrics, mock_insert):
-    reference = [{"body": "text", "entities": []}] * 3
-    mock_load.return_value = reference
-    overall = MagicMock(precision=0.9, recall=0.85, f1=0.87, support=42)
-    per = MagicMock(precision=0.9, recall=0.85, f1=0.87, support=10)
-    mock_metrics.return_value = {"overall": overall, "PER": per}
+def test_evaluate_happy_path(mock_init, mock_sep, mock_conll, mock_insert):
     result = jobs.evaluate_job.run()
     assert result["status"] == "success"
-    assert result["sample_size"] == 3
-    assert "overall" in result["metrics"]
-    assert result["metrics"]["overall"]["precision"] == 0.9
-    assert result["metrics"]["overall"]["recall"] == 0.85
-    assert result["metrics"]["overall"]["f1"] == 0.87
-    assert result["metrics"]["overall"]["support"] == 42
+    assert result["separability"]["improvement_pct"] == 5.0
+    assert result["conll_metrics"]["f1"] == 0.87
     mock_insert.assert_called_once()
 
 
-@patch("evaluation.compute_ner_metrics")
-@patch("features.ner_extractor.batch_extract", side_effect=lambda x: x)
-@patch("evaluation.sample_loader.load_ner_sample")
+@patch("evaluation.conll_eval.run_conll_eval", return_value=_CONLL_RESULT)
+@patch("evaluation.separability_eval.compute_separability", return_value=_SEP_RESULT)
 @patch("database.init_db.init_databases")
-def test_evaluate_dry_run(mock_init, mock_load, mock_extract, mock_metrics):
-    reference = [{"body": "text"}] * 2
-    mock_load.return_value = reference
-    overall = MagicMock(precision=0.9, recall=0.85, f1=0.87, support=42)
-    mock_metrics.return_value = {"overall": overall}
+def test_evaluate_dry_run(mock_init, mock_sep, mock_conll):
     result = jobs.evaluate_job.run(dry_run=True)
     assert result["status"] == "success"
-    assert result["metrics"]["overall"]["precision"] == 0.9
+    assert result["separability"]["verdict"] == "NER_BETTER"
 
 
-@patch("evaluation.compute_ner_metrics", side_effect=RuntimeError("metrics fail"))
-@patch("features.ner_extractor.batch_extract", side_effect=lambda x: x)
-@patch("evaluation.sample_loader.load_ner_sample", return_value=[{"body": "text"}])
+@patch("evaluation.separability_eval.compute_separability", side_effect=RuntimeError("sep fail"))
 @patch("database.init_db.init_databases")
-def test_evaluate_compute_raises(mock_init, mock_load, mock_extract, mock_metrics):
+def test_evaluate_compute_raises(mock_init, mock_sep):
     result = jobs.evaluate_job.run()
     assert result["status"] == "failed"
-    assert "metrics fail" in result["errors"][0]
+    assert "sep fail" in result["errors"][0]
 
 
-@patch("evaluation.compute_ner_metrics")
-@patch("features.ner_extractor.batch_extract", side_effect=lambda x: x)
-@patch("evaluation.sample_loader.load_ner_sample")
+@patch("evaluation.conll_eval.run_conll_eval", return_value=_CONLL_RESULT)
+@patch("evaluation.separability_eval.compute_separability", return_value=_SEP_RESULT)
 @patch("database.init_db.init_databases")
-def test_evaluate_metrics_has_required_keys(mock_init, mock_load, mock_extract, mock_metrics):
-    mock_load.return_value = [{"body": "text"}]
-    overall = MagicMock(precision=0.9, recall=0.85, f1=0.87, support=42)
-    mock_metrics.return_value = {"overall": overall}
+def test_evaluate_metrics_has_required_keys(mock_init, mock_sep, mock_conll):
     result = jobs.evaluate_job.run(dry_run=True)
-    m = result["metrics"]["overall"]
-    for key in ("precision", "recall", "f1", "support"):
-        assert key in m
+    for key in ("separability", "conll_metrics", "status", "errors", "duration_seconds"):
+        assert key in result
+    assert result["separability"]["sample_size"] == 10

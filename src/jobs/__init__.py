@@ -24,6 +24,7 @@ def run_job(
     job_name: str,
     for_date: date | None = None,
     dry_run: bool = False,
+    limit: int = 0,
     log_fn: Any = None,
     stop_event: threading.Event | None = None,
 ) -> dict[str, Any]:
@@ -38,6 +39,8 @@ def run_job(
         Target date for the job (used by scrape, classify). Defaults to today.
     dry_run : bool
         If True, print actions but don't commit changes.
+    limit : int
+        Limit for articles to process in specific jobs (e.g., clean).
     log_fn : callable, optional
         Called with a string message at each major job milestone.
 
@@ -62,11 +65,11 @@ def run_job(
     elif job_name == "clean":
         from jobs.clean_job import run as clean_run
 
-        return clean_run(dry_run=dry_run, log_fn=_log, stop_event=_stop)
+        return clean_run(limit=limit, dry_run=dry_run, log_fn=_log, stop_event=_stop)
     elif job_name in ("classify", "ner"):
         from jobs.classify_job import run as classify_run
 
-        return classify_run(for_date=for_date, dry_run=dry_run, log_fn=_log, stop_event=_stop)
+        return classify_run(for_date=for_date, limit=limit, dry_run=dry_run, log_fn=_log, stop_event=_stop)
     elif job_name == "evaluate":
         from jobs.evaluate_job import run as evaluate_run
 

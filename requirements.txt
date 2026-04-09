@@ -35,3 +35,7 @@ kaggle==1.6.6
 
 # Monitoring
 prometheus-client==0.20.0
+
+# Evaluation
+seqeval>=1.2.2
+datasets>=2.14.0

@@ -1,58 +1,29 @@
 # ──────────────────────────────────────────────────────────────────────────
 # PRODUCTION DEPLOYMENT SETUP
 # ──────────────────────────────────────────────────────────────────────────
-#
-# This compose stack is optimized for production deployment:
-# - MongoDB with persistent volumes and backups
-# - All services connect to external proxy network
-# - Resource limits applied to all containers
-# - Logging to central aggregation (optional)
-# - Health checks for service recovery
-# - No host volume mounts (secure)
-#
-# Prerequisites:
-#   - External Docker network must exist:
-#     docker network create --driver bridge nlp_proxy_network
-#
-# Usage:
-#   docker-compose -f docker-compose.prod.yml up -d
-#   docker-compose -f docker-compose.prod.yml logs -f api
-#   docker-compose -f docker-compose.prod.yml down
-#
-# For local development, use docker-compose.yml instead.
-
-volumes:
-  hf_cache_prod:
-    driver: local
-  mongo_data_prod:
-    driver: local
-  prometheus_data_prod:
-    driver: local
-  grafana_data_prod:
-    driver: local
+# Optimized for production:
+# - Data stored in ./data/
+# - Services on the 'proxy' network
+# - Resource limits and health checks
 
 services:
-  # ── MongoDB database (production instance) ──────────────────────────────
+  # ── MongoDB database ────────────────────────────────────────────────────
   mongodb:
     image: mongo:7.0
-    container_name: nlp_mongodb_prod
+    container_name: nlp_mongodb
     restart: always
-    # Connect to external proxy network
     networks:
-      - nlp_proxy_network
+      - proxy
     volumes:
-      - mongo_data_prod:/data/db
+      - ./data/mongo:/data/db
     environment:
       MONGO_INITDB_DATABASE: admin
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-}
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -69,19 +40,19 @@ services:
         labels: "service=mongodb"
 
   # ── Job scheduler / pipeline runner ──────────────────────────────────────
-  # Runs scheduled jobs for scraping, cleaning, classification, evaluation
   jobs:
     build:
       context: .
       dockerfile: Dockerfile
-    image: seraphim-systems/nlp-article-analyzer:latest
-    container_name: nlp_jobs_prod
+    image: nlp-analyzer:latest
+    container_name: nlp_jobs
     restart: always
     depends_on:
       mongodb:
         condition: service_healthy
     networks:
-      - nlp_proxy_network
+      - proxy
+    env_file: .env
     environment:
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
       RAW_DB_NAME: ${RAW_DB_NAME:-nlp_raw}
@@ -91,14 +62,14 @@ services:
       NER_DB_NAME: ${NER_DB_NAME:-nlp_ner}
       NER_COLLECTION: ${NER_COLLECTION:-ner_articles}
       PYTHONUNBUFFERED: "1"
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      KAGGLE_ENABLED: ${KAGGLE_ENABLED:-false}
-      SKIP_BOOTSTRAP: ${SKIP_BOOTSTRAP:-true}
-    # Entrypoint handles init + bootstrap, then waits for scheduled job execution
-    # (orchestrated externally via cron/K8s CronJob or manual CLI)
+      LOG_LEVEL: INFO
+      KAGGLE_ENABLED: "true"
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+      KAGGLE_KEY: ${KAGGLE_KEY}
+      SKIP_BOOTSTRAP: "false"
     command: wait
     volumes:
-      - hf_cache_prod:/root/.cache/huggingface
+      - ./data/hf_cache:/root/.cache/huggingface
     deploy:
       resources:
         limits:
@@ -115,18 +86,17 @@ services:
         labels: "service=jobs"
 
   # ── Frontend dashboard (React SPA) ──────────────────────────────────────
-  # Serves the static assets and proxies /api to the backend service
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
     image: nlp-frontend:latest
-    container_name: nlp_frontend_prod
+    container_name: nlp_frontend
     restart: always
     depends_on:
       - api
     networks:
-      - nlp_proxy_network
+      - proxy
     expose:
       - "80"
     logging:
@@ -137,19 +107,19 @@ services:
         labels: "service=frontend"
 
   # ── FastAPI web service (REST API) ──────────────────────────────────────
-  # Serves REST endpoints for article queries, job management, metrics
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: seraphim-systems/nlp-article-analyzer:latest
-    container_name: nlp_api_prod
+    image: nlp-analyzer:latest
+    container_name: nlp_api
     restart: always
     depends_on:
       mongodb:
         condition: service_healthy
     networks:
-      - nlp_proxy_network
+      - proxy
+    env_file: .env
     environment:
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
       RAW_DB_NAME: ${RAW_DB_NAME:-nlp_raw}
@@ -159,14 +129,14 @@ services:
       NER_DB_NAME: ${NER_DB_NAME:-nlp_ner}
       NER_COLLECTION: ${NER_COLLECTION:-ner_articles}
       PYTHONUNBUFFERED: "1"
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      KAGGLE_ENABLED: ${KAGGLE_ENABLED:-false}
-      SKIP_BOOTSTRAP: ${SKIP_BOOTSTRAP:-true}
-    # Entrypoint handles init, CMD specifies 'api' service
+      LOG_LEVEL: INFO
+      KAGGLE_ENABLED: "false"
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME}
+      KAGGLE_KEY: ${KAGGLE_KEY}
+      SKIP_BOOTSTRAP: "true"
     command: api
     expose:
       - "80"
-    # Note: No direct port mapping! Access via frontend or proxy network.
     deploy:
       resources:
         limits:
@@ -186,18 +156,18 @@ services:
   # ── Prometheus metrics collector ─────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.51.0
-    container_name: nlp_prometheus_prod
+    container_name: nlp_prometheus
     restart: always
     depends_on:
       - api
     networks:
-      - nlp_proxy_network
+      - proxy
     expose:
       - "9090"
     volumes:
       - ./monitoring/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus.alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus_data_prod:/prometheus
+      - ./data/prometheus:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -221,12 +191,12 @@ services:
   # ── Grafana dashboard ─────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.2
-    container_name: nlp_grafana_prod
+    container_name: nlp_grafana
     restart: always
     depends_on:
       - prometheus
     networks:
-      - nlp_proxy_network
+      - proxy
     expose:
       - "3000"
     environment:
@@ -235,7 +205,7 @@ services:
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/nlp_pipeline.json
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - grafana_data_prod:/var/lib/grafana
+      - ./data/grafana:/var/lib/grafana
     deploy:
       resources:
         limits:
@@ -251,22 +221,7 @@ services:
         max-file: "3"
         labels: "service=grafana"
 
-# ──────────────────────────────────────────────────────────────────────────
-# EXTERNAL NETWORK
-# ──────────────────────────────────────────────────────────────────────────
-# 
-# Connects to an external Docker network (e.g., managed by Traefik/nginx proxy).
-# This allows the proxy to route requests to the api service without exposing
-# container ports directly.
-#
-# Create the network:
-#   docker network create --driver bridge nlp_proxy_network
-#
-# Or if using Traefik:
-#   docker network create --driver bridge traefik_network
-#   # Then update network name below
-
 networks:
-  nlp_proxy_network:
+  proxy:
     external: true
-    name: nlp_proxy_network
+    name: proxy

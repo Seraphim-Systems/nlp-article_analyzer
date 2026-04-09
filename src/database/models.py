@@ -332,3 +332,31 @@ SENTENCE_INDEXES = [
     # Find all sentences by article
     {"keys": [("docID", 1)], "options": {"name": "docID_idx"}},
 ]
+
+
+# ---------------------------------------------------------------------------
+# Job Tracking Schema
+# ---------------------------------------------------------------------------
+
+JOB_VALIDATOR: dict[str, Any] = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["job_id", "job_name", "status", "started_at"],
+        "properties": {
+            "job_id":      {"bsonType": "string"},
+            "job_name":    {"bsonType": "string"},
+            "status":      {"bsonType": "string", "enum": ["queued", "running", "success", "failed", "cancelled"]},
+            "started_at":  {"bsonType": "string"},
+            "finished_at": {"bsonType": ["string", "null"]},
+            "result":      {"bsonType": ["object", "null"]},
+            "logs":        {"bsonType": "array", "items": {"bsonType": "string"}},
+            "cancel_requested": {"bsonType": "bool"},
+        },
+    }
+}
+
+JOB_INDEXES = [
+    {"keys": [("job_id", 1)], "options": {"unique": True, "name": "job_id_unique"}},
+    {"keys": [("started_at", -1)], "options": {"name": "started_at_idx"}},
+    {"keys": [("status", 1)], "options": {"name": "status_idx"}},
+]

@@ -111,14 +111,31 @@ export interface SeparabilityData {
   verdict: 'improved' | 'inconclusive' | 'degraded'
 }
 
+export interface SeparabilityMetrics {
+  sample_size: number
+  clean_avg_similarity: number
+  ner_avg_similarity: number
+  clean_std: number
+  ner_std: number
+  top25_jaccard: number
+  top25_overlap_count: number
+  ner_specific_terms: number
+  improvement_pct: number
+  verdict: 'improved' | 'inconclusive' | 'degraded'
+}
+
 export interface EvalMetrics {
   model_version: string | null
   last_updated: string | null
+  // CoNLL-2003 NER quality (secondary)
   precision: number | null
   recall: number | null
   f1: number | null
   per_entity: Record<string, EntityMetrics> | null
   sample_size: number | null
+  benchmark: string | null
+  // Separability (primary research evaluation)
+  separability: SeparabilityMetrics | null
 }
 
 // ── API calls ──────────────────────────────────────────────────
@@ -137,7 +154,8 @@ export const api = {
   },
 
   nerArticle: (url: string) => {
-    const b64 = btoa(url).replace(/=/g, '')
+    // btoa doesn't handle Unicode characters; use a safer alternative
+    const b64 = btoa(unescape(encodeURIComponent(url))).replace(/=/g, '')
     return get<NERArticleDetail>(`/articles/ner/${b64}`)
   },
 
@@ -154,4 +172,10 @@ export const api = {
   jobById:   (id: string) => get<Job>(`/jobs/${id}`),
   cancelJob: (id: string) => post<{ job_id: string; status: string }>(`/jobs/${id}/cancel`, {}),
   metrics:   () => get<EvalMetrics>('/metrics'),
+
+  prometheusMetrics: () =>
+    fetch(`${BASE}/prometheus-metrics`).then(r => {
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      return r.text()
+    }),
 }

@@ -293,10 +293,11 @@ export default function NERExplorer() {
   const [search, setSearch]         = useState('')
   const [selected, setSelected]     = useState<string | null>(null)
   const [collection, setCollection] = useState<'ner' | 'clean'>('ner')
+  const [limit, setLimit]           = useState(10)
 
   const { data, loading } = useQuery(
-    () => api.articles({ collection, limit: 40, search: search || undefined }),
-    [collection, search],
+    () => api.articles({ collection, limit, search: search || undefined }),
+    [collection, search, limit],
   )
 
   const showNER = collection === 'ner'
@@ -321,7 +322,7 @@ export default function NERExplorer() {
               key={c}
               className={`btn ${collection === c ? 'btn-primary' : 'btn-ghost'}`}
               style={{ fontSize: 11, padding: '4px 12px', flex: 1 }}
-              onClick={() => { setCollection(c); setSelected(null) }}
+              onClick={() => { setCollection(c); setSelected(null); setLimit(10) }}
             >
               {c === 'ner' ? 'NER' : 'Clean'}
             </button>
@@ -340,7 +341,7 @@ export default function NERExplorer() {
             }}
             placeholder="Search articles…"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setLimit(10) }}
           />
         </div>
 
@@ -349,7 +350,11 @@ export default function NERExplorer() {
 
         {/* Article list */}
         <div style={{ overflowY: 'auto', flex: 1 }}>
-          {loading && <LoadingSpinner size="sm" />}
+          {loading && !data && (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+              <div className="spinner" />
+            </div>
+          )}
           {data?.items.map(a => (
             <ArticleListItem
               key={a.url}
@@ -358,6 +363,18 @@ export default function NERExplorer() {
               onClick={() => setSelected(a.url)}
             />
           ))}
+          {data && data.items.length < data.total && (
+            <div style={{ padding: '12px 14px', textAlign: 'center' }}>
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: 11, width: '100%' }}
+                onClick={() => setLimit(prev => prev + 10)}
+                disabled={loading}
+              >
+                {loading ? 'Loading…' : 'Load More'}
+              </button>
+            </div>
+          )}
           {data?.items.length === 0 && !loading && (
             <div style={{ color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', padding: '32px 16px' }}>
               {collection === 'ner' ? 'NER job not yet run' : 'No articles found'}

@@ -238,6 +238,8 @@ def test_batch_fill_rank1_preserves_order(mock_article):
 @pytest.fixture
 def cleaner_mocks():
     """Set up all mocks needed by cleaner module functions."""
+    fake_col = MagicMock()
+    fake_col.find.return_value = []
     with patch("cleaning.cleaner.make_pbar_simple", side_effect=lambda x, **kw: x), \
          patch("cleaning.cleaner.rank_article_with_reasons") as mock_rank, \
          patch("cleaning.cleaner.fill_missing_fields", side_effect=lambda a: a) as mock_fill, \
@@ -248,25 +250,21 @@ def cleaner_mocks():
          patch("cleaning.cleaner.upsert_quarantine_articles", return_value=0) as mock_quarantine, \
          patch("cleaning.cleaner.update_raw_article_fields") as mock_update_fields, \
          patch("cleaning.cleaner.update_raw_rank") as mock_update_rank, \
-         patch("cleaning.cleaner.upsert_clean_articles", return_value=0) as mock_upsert_clean:
-
-        # Also patch the raw collection access in _rank_unranked_articles
-        fake_col = MagicMock()
-        fake_col.find.return_value = []
-        with patch("builtins.__import__", wraps=__import__) as mock_import:
-            yield {
-                "rank": mock_rank,
-                "fill": mock_fill,
-                "enrich": mock_enrich,
-                "bulk_update": mock_bulk,
-                "count": mock_count,
-                "get_by_rank": mock_get_by_rank,
-                "quarantine": mock_quarantine,
-                "update_fields": mock_update_fields,
-                "update_rank": mock_update_rank,
-                "upsert_clean": mock_upsert_clean,
-                "fake_col": fake_col,
-            }
+         patch("cleaning.cleaner.upsert_clean_articles", return_value=0) as mock_upsert_clean, \
+         patch("database.repositories.get_raw_collection", return_value=fake_col):
+        yield {
+            "rank": mock_rank,
+            "fill": mock_fill,
+            "enrich": mock_enrich,
+            "bulk_update": mock_bulk,
+            "count": mock_count,
+            "get_by_rank": mock_get_by_rank,
+            "quarantine": mock_quarantine,
+            "update_fields": mock_update_fields,
+            "update_rank": mock_update_rank,
+            "upsert_clean": mock_upsert_clean,
+            "fake_col": fake_col,
+        }
 
 
 def test_cleaner_no_unranked_no_rank1(cleaner_mocks):
@@ -281,7 +279,7 @@ def test_cleaner_promotes_rank0(cleaner_mocks):
     from cleaning.cleaner import run_cleaning_pipeline
     rank0_art = [_base_article(rank=0)]
 
-    def get_by_rank_side(rank):
+    def get_by_rank_side(rank, limit=0):
         if rank == 0:
             return rank0_art
         return []
@@ -298,7 +296,7 @@ def test_cleaner_quarantines_rank2(cleaner_mocks):
     from cleaning.cleaner import run_cleaning_pipeline
     rank2_art = [_base_article(rank=2)]
 
-    def get_by_rank_side(rank):
+    def get_by_rank_side(rank, limit=0):
         if rank == 2:
             return rank2_art
         return []

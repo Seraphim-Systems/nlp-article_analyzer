@@ -30,6 +30,8 @@ from database.models import (
     RAW_INDEXES,
     SENTENCE_INDEXES,
     SENTENCE_VALIDATOR,
+    JOB_VALIDATOR,
+    JOB_INDEXES,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,6 +110,48 @@ def get_sentences_collection() -> Collection:
     )
 
 
+def get_jobs_collection() -> Collection:
+    """Get or create the jobs collection in MODELS_DB."""
+    return _ensure_collection(
+        get_models_db(),
+        "jobs",
+        JOB_VALIDATOR,
+        JOB_INDEXES,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Job operations
+# ---------------------------------------------------------------------------
+
+
+def insert_job(job: dict[str, Any]) -> None:
+    get_jobs_collection().insert_one(job)
+
+
+def get_job_by_id(job_id: str) -> dict[str, Any] | None:
+    return get_jobs_collection().find_one({"job_id": job_id}, {"_id": 0})
+
+
+def list_jobs(limit: int = 50) -> list[dict[str, Any]]:
+    return list(get_jobs_collection().find({}, {"_id": 0}).sort("started_at", -1).limit(limit))
+
+
+def update_job(job_id: str, updates: dict[str, Any]) -> None:
+    get_jobs_collection().update_one({"job_id": job_id}, {"$set": updates})
+
+
+def append_job_log(job_id: str, message: str) -> None:
+    get_jobs_collection().update_one({"job_id": job_id}, {"$push": {"logs": message}})
+
+
+def mark_job_cancelled(job_id: str) -> None:
+    get_jobs_collection().update_one(
+        {"job_id": job_id},
+        {"$set": {"status": "cancelled", "cancel_requested": True, "finished_at": datetime.now(timezone.utc).isoformat() + "Z"}},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Raw-collection operations
 # ---------------------------------------------------------------------------
@@ -139,9 +183,12 @@ def insert_raw_articles(articles: list[dict[str, Any]]) -> int:
     return inserted
 
 
-def get_raw_articles_by_rank(rank: int) -> Iterator[dict[str, Any]]:
+def get_raw_articles_by_rank(rank: int, limit: int = 0) -> Iterator[dict[str, Any]]:
     """Iterate over raw articles matching a cleaning rank."""
-    return get_raw_collection().find({"rank": rank})
+    query = get_raw_collection().find({"rank": rank})
+    if limit > 0:
+        query = query.limit(limit)
+    return query
 
 
 def update_raw_rank(url: str, rank: int, reasons: list[str] | None = None) -> None:
@@ -244,10 +291,13 @@ def upsert_clean_articles(articles: list[dict[str, Any]]) -> int:
     return upserted
 
 
-def get_unprocessed_clean_articles() -> list[dict]:
+def get_unprocessed_clean_articles(limit: int = 0) -> list[dict]:
     """Return clean articles not yet processed by the NER job."""
     processed_urls = set(get_ner_collection().distinct("url"))
-    return list(get_clean_collection().find({"url": {"$nin": list(processed_urls)}}))
+    query = get_clean_collection().find({"url": {"$nin": list(processed_urls)}})
+    if limit > 0:
+        query = query.limit(limit)
+    return list(query)
 
 
 def insert_ner_articles(articles: list[dict]) -> int:

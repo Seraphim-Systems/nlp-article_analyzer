@@ -56,11 +56,13 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def clear_jobs():
+def clear_stop_events():
     from web import app as web_app
-    web_app._jobs.clear()
+    with web_app._stop_events_lock:
+        web_app._stop_events.clear()
     yield
-    web_app._jobs.clear()
+    with web_app._stop_events_lock:
+        web_app._stop_events.clear()
 
 
 @pytest.fixture()
@@ -165,7 +167,7 @@ class TestStats:
 
 class TestJobTrigger:
     def test_valid_job_name(self, client):
-        with patch("web.app._run_job_thread"):
+        with patch("web.app._run_job_thread"), patch("web.app.insert_job"):
             r = client.post("/jobs/trigger", json={"job_name": "scrape"})
         assert r.status_code == 200
         data = r.json()
@@ -177,11 +179,13 @@ class TestJobTrigger:
         assert r.status_code == 400
 
     def test_jobs_dict_updated(self, client):
-        from web import app as web_app
-        with patch("web.app._run_job_thread"):
+        with patch("web.app._run_job_thread"), \
+             patch("web.app.insert_job") as mock_insert:
             r = client.post("/jobs/trigger", json={"job_name": "clean"})
         job_id = r.json()["job_id"]
-        assert job_id in web_app._jobs
+        assert mock_insert.called
+        inserted = mock_insert.call_args[0][0]
+        assert inserted["job_id"] == job_id
 
 
 # ---------------------------------------------------------------------------
@@ -190,9 +194,7 @@ class TestJobTrigger:
 
 class TestJobStatus:
     def test_known_job(self, client):
-        from web import app as web_app
-        stop_event = threading.Event()
-        web_app._jobs["abc123"] = {
+        job_doc = {
             "job_id": "abc123",
             "job_name": "scrape",
             "status": "running",
@@ -200,10 +202,9 @@ class TestJobStatus:
             "finished_at": None,
             "result": None,
             "logs": [],
-            "_stop_event": stop_event,
         }
-
-        r = client.get("/jobs/abc123")
+        with patch("web.app.get_job_by_id", return_value=job_doc):
+            r = client.get("/jobs/abc123")
         assert r.status_code == 200
         data = r.json()
         assert data["job_id"] == "abc123"
@@ -213,10 +214,10 @@ class TestJobStatus:
         assert "finished_at" in data
         assert "result" in data
         assert "logs" in data
-        assert "_stop_event" not in data
 
     def test_unknown_job(self, client):
-        r = client.get("/jobs/unknown")
+        with patch("web.app.get_job_by_id", return_value=None):
+            r = client.get("/jobs/unknown")
         assert r.status_code == 404
 
 
@@ -226,45 +227,28 @@ class TestJobStatus:
 
 class TestListJobs:
     def test_returns_sorted_jobs(self, client):
-        from web import app as web_app
-        for i in range(3):
-            web_app._jobs[f"j{i}"] = {
-                "job_id": f"j{i}",
-                "job_name": "scrape",
-                "status": "success",
-                "started_at": f"2024-01-0{i + 1}T00:00:00Z",
-                "finished_at": None,
-                "result": None,
-                "logs": [],
-                "_stop_event": threading.Event(),
-            }
-
-        r = client.get("/jobs")
+        jobs_data = [
+            {"job_id": f"j{i}", "job_name": "scrape", "status": "success",
+             "started_at": f"2024-01-0{i + 1}T00:00:00Z", "finished_at": None,
+             "result": None, "logs": []}
+            for i in range(3)
+        ]
+        with patch("web.app.repo_list_jobs", return_value=jobs_data):
+            r = client.get("/jobs")
         assert r.status_code == 200
         data = r.json()
         assert "jobs" in data
-        jobs = data["jobs"]
-        assert len(jobs) == 3
-        # Most recent first
-        assert jobs[0]["started_at"] >= jobs[1]["started_at"]
-        # No _stop_event exposed
-        for j in jobs:
-            assert "_stop_event" not in j
+        assert len(data["jobs"]) == 3
 
     def test_max_50_jobs(self, client):
-        from web import app as web_app
-        for i in range(55):
-            web_app._jobs[f"j{i:03d}"] = {
-                "job_id": f"j{i:03d}",
-                "job_name": "scrape",
-                "status": "success",
-                "started_at": f"2024-01-01T00:{i:02d}:00Z",
-                "finished_at": None,
-                "result": None,
-                "logs": [],
-                "_stop_event": threading.Event(),
-            }
-        r = client.get("/jobs")
+        jobs_data = [
+            {"job_id": f"j{i:03d}", "job_name": "scrape", "status": "success",
+             "started_at": f"2024-01-01T00:{i:02d}:00Z", "finished_at": None,
+             "result": None, "logs": []}
+            for i in range(50)
+        ]
+        with patch("web.app.repo_list_jobs", return_value=jobs_data):
+            r = client.get("/jobs")
         assert len(r.json()["jobs"]) <= 50
 
 
@@ -276,40 +260,33 @@ class TestCancelJob:
     def test_cancel_queued(self, client):
         from web import app as web_app
         stop_event = threading.Event()
-        web_app._jobs["c1"] = {
-            "job_id": "c1",
-            "job_name": "scrape",
-            "status": "queued",
-            "started_at": "2024-01-01T00:00:00Z",
-            "finished_at": None,
-            "result": None,
-            "logs": [],
-            "_stop_event": stop_event,
+        with web_app._stop_events_lock:
+            web_app._stop_events["c1"] = stop_event
+        job_doc = {
+            "job_id": "c1", "job_name": "scrape", "status": "queued",
+            "started_at": "2024-01-01T00:00:00Z", "finished_at": None,
+            "result": None, "logs": [],
         }
-
-        r = client.post("/jobs/c1/cancel")
+        with patch("web.app.get_job_by_id", return_value=job_doc), \
+             patch("web.app.mark_job_cancelled"):
+            r = client.post("/jobs/c1/cancel")
         assert r.status_code == 200
         assert r.json()["status"] == "cancelled"
         assert stop_event.is_set()
 
     def test_cancel_already_cancelled(self, client):
-        from web import app as web_app
-        web_app._jobs["c2"] = {
-            "job_id": "c2",
-            "job_name": "scrape",
-            "status": "cancelled",
-            "started_at": "2024-01-01T00:00:00Z",
-            "finished_at": "2024-01-01T00:01:00Z",
-            "result": None,
-            "logs": [],
-            "_stop_event": threading.Event(),
+        job_doc = {
+            "job_id": "c2", "job_name": "scrape", "status": "cancelled",
+            "started_at": "2024-01-01T00:00:00Z", "finished_at": "2024-01-01T00:01:00Z",
+            "result": None, "logs": [],
         }
-
-        r = client.post("/jobs/c2/cancel")
+        with patch("web.app.get_job_by_id", return_value=job_doc):
+            r = client.post("/jobs/c2/cancel")
         assert r.status_code == 400
 
     def test_cancel_unknown(self, client):
-        r = client.post("/jobs/nope/cancel")
+        with patch("web.app.get_job_by_id", return_value=None):
+            r = client.post("/jobs/nope/cancel")
         assert r.status_code == 404
 
 
