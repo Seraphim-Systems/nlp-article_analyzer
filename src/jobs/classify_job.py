@@ -191,7 +191,7 @@ def run(for_date: date | None = None, dry_run: bool = False, log_fn=None, stop_e
                         NER_ENTITIES_EXTRACTED_TOTAL.labels(
                             entity_type=ent.get("label", "MISC")
                         ).inc()
-            except ImportError:
+            except (ImportError, AttributeError, TypeError, ValueError):
                 pass
 
             if not dry_run and len(pending) >= FLUSH_EVERY:

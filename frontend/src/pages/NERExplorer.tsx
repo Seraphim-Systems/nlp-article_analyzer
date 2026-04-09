@@ -234,7 +234,7 @@ function ArticleDetail({ url, showNER }: { url: string; showNER: boolean }) {
           border: '1px solid var(--border)',
         }}>
           {showNER && ner
-            ? renderNERText(ner.body, entities)
+            ? renderNERText(ner.body.replace(/\s+/g, ' ').trim(), entities)
             : <span>{clean.body}</span>
           }
         </div>

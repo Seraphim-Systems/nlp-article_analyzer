@@ -21,16 +21,9 @@ const JOBS = [
     rgba:  'rgba(96,165,250,0.07)',
   },
   {
-    id:    'classify',
-    label: 'Classify',
-    desc:  'BERT NER extraction and build ner_preprocessed_text',
-    color: 'var(--ner-org)',
-    rgba:  'rgba(56,189,248,0.07)',
-  },
-  {
     id:    'ner',
     label: 'NER',
-    desc:  'Entity tagging pipeline into ner_articles collection',
+    desc:  'BERT NER extraction into ner_articles collection',
     color: 'var(--ner-loc)',
     rgba:  'rgba(52,211,153,0.07)',
   },

@@ -312,7 +312,7 @@ def _run_job_thread(job_id: str, job_name: str, dry_run: bool, stop_event: threa
 @app.post("/jobs/trigger", tags=["jobs"], response_model=JobTriggerResponse)
 async def trigger_job(request: JobTriggerRequest) -> JobTriggerResponse:
     """Trigger a pipeline job asynchronously."""
-    valid = {"scrape", "clean", "classify", "ner", "evaluate"}
+    valid = {"scrape", "clean", "ner", "evaluate"}
     if request.job_name not in valid:
         raise HTTPException(400, f"Invalid job. Must be one of: {', '.join(sorted(valid))}")
 
