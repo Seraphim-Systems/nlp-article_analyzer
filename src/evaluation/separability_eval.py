@@ -13,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def compute_separability(sample_size: int = 200) -> dict[str, Any]:
+def compute_separability(sample_size: int = 4000) -> dict[str, Any]:
     """
     Compute TF-IDF separability metrics for clean vs NER-enhanced text.
 

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME     = "dslim/bert-base-NER"
 BENCHMARK      = "wikiann"
-DEFAULT_SAMPLE = 500  # sentences; wikiann English test set is ~10k
+DEFAULT_SAMPLE = 10000  # sentences; wikiann English test set is ~10k
 
 
 def _build_char_offsets(tokens: list[str]) -> list[tuple[int, int]]:
@@ -62,7 +62,7 @@ def run_conll_eval(sample_size: int = DEFAULT_SAMPLE) -> dict[str, Any]:
     Parameters
     ----------
     sample_size : int
-        Number of sentences to evaluate (default 500; full test = ~10k).
+        Number of sentences to evaluate (default 10000; full test = ~10k).
 
     Returns
     -------
