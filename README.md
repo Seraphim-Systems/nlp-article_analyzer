@@ -64,6 +64,9 @@ cp .env.example .env
 
 # Optional: Add Kaggle API key to .env for bootstrapping historical data
 # KAGGLE_KEY=your_key_here
+# Set `NVIDIA_VISIBLE_DEVICES=all` in .env for GPU acceleration (requires NVIDIA Container Toolkit)
+# Set SKIP_BOOTSTRAP=true in .env to skip the initial data bootstrapping (useful for development or if you have a pre-populated MongoDB)
+# Set SKIP_BOOTSTRAP=false in .env to enable the initial data bootstrapping (default behavior) (requires Kaggle API key and internet access)
 
 # 3. Spin up all infrastructure and wait for data bootstrap
 docker compose up --build -d

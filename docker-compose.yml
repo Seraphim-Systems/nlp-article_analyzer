@@ -79,7 +79,7 @@ services:
       KAGGLE_ENABLED: "true"
       KAGGLE_USERNAME: ${KAGGLE_USERNAME}
       KAGGLE_KEY: ${KAGGLE_KEY}
-      SKIP_BOOTSTRAP: "false"
+      SKIP_BOOTSTRAP: ${SKIP_BOOTSTRAP:-"false"}
       SKIP_RANK1_RECOVERY: "true"
       RUN_CLEAN_AFTER_SCRAPE: "true"
       ENGLISH_ONLY: "true"
