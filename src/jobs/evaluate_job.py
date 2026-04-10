@@ -22,10 +22,12 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 MODEL_VERSION       = "dslim/bert-base-NER"
-SEPARABILITY_SAMPLE = 200
+SEPARABILITY_SAMPLE = settings.EVAL_SEPARABILITY_SAMPLE
 CONLL_SAMPLE        = 500
 
 

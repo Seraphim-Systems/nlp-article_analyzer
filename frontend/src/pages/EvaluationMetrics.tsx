@@ -2,6 +2,23 @@ import { useState, useCallback } from 'react'
 import { useQuery } from '../hooks/useQuery'
 import { api, EvalMetrics, EntityMetrics, SeparabilityMetrics } from '../api/client'
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+import {
   FlaskConical, Clock, Copy, Check, RefreshCw,
   TrendingDown, TrendingUp, Minus,
 } from 'lucide-react'
@@ -13,6 +30,222 @@ const NER_COLOR: Record<string, string> = {
 }
 const NER_FULL: Record<string, string> = {
   PER: 'Person', ORG: 'Organisation', LOC: 'Location', MISC: 'Miscellaneous',
+}
+
+const PCT = (value: number) => `${(value * 100).toFixed(1)}%`
+
+function ChartCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <div className="card" style={{ padding: '16px 16px 10px 16px' }}>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          {title}
+        </div>
+        {subtitle && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function OverallQualityRadar({ data }: { data: EvalMetrics }) {
+  const radarData = [
+    { metric: 'Precision', value: data.precision ?? 0 },
+    { metric: 'Recall', value: data.recall ?? 0 },
+    { metric: 'F1', value: data.f1 ?? 0 },
+  ]
+
+  return (
+    <ChartCard title="Quality Shape" subtitle="Balanced model quality across precision, recall and F1">
+      <div style={{ width: '100%', height: 250 }}>
+        <ResponsiveContainer>
+          <RadarChart data={radarData} outerRadius="72%">
+            <PolarGrid stroke="var(--border-mid)" />
+            <PolarAngleAxis dataKey="metric" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+            <Tooltip
+              formatter={(value: number) => PCT(value)}
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-mid)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
+            <Radar
+              dataKey="value"
+              stroke="var(--accent-hi)"
+              fill="var(--accent)"
+              fillOpacity={0.32}
+            />
+          </RadarChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
+  )
+}
+
+function PerEntityQualityBars({ perEntity }: { perEntity: Record<string, EntityMetrics> }) {
+  const chartData = Object.entries(perEntity)
+    .map(([label, m]) => ({
+      label,
+      name: NER_FULL[label] ?? label,
+      precision: m.precision,
+      recall: m.recall,
+      f1: m.f1,
+    }))
+    .sort((a, b) => b.f1 - a.f1)
+
+  return (
+    <ChartCard title="Per-Entity Quality" subtitle="Precision, recall and F1 by entity type">
+      <div style={{ width: '100%', height: 280 }}>
+        <ResponsiveContainer>
+          <BarChart data={chartData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="label" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+            <YAxis
+              domain={[0, 1]}
+              tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
+              tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
+            />
+            <Tooltip
+              formatter={(value: number, name: string) => [PCT(value), name]}
+              labelFormatter={(label: string) => `${label} (${NER_FULL[label] ?? label})`}
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-mid)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="precision" fill="var(--accent-hi)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="recall" fill="var(--ner-loc)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="f1" fill="var(--gold)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
+  )
+}
+
+function EntitySupportBars({ perEntity }: { perEntity: Record<string, EntityMetrics> }) {
+  const chartData = Object.entries(perEntity)
+    .map(([label, m]) => ({
+      label,
+      support: m.support,
+      color: NER_COLOR[label] ?? 'var(--text-secondary)',
+    }))
+    .sort((a, b) => b.support - a.support)
+
+  return (
+    <ChartCard title="Entity Distribution" subtitle="How much each entity type contributes to the benchmark">
+      <div style={{ width: '100%', height: 280 }}>
+        <ResponsiveContainer>
+          <BarChart data={chartData} layout="vertical" margin={{ top: 6, right: 12, left: 10, bottom: 6 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis type="number" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+            <YAxis type="category" dataKey="label" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} width={38} />
+            <Tooltip
+              formatter={(value: number) => [value.toLocaleString(), 'Support']}
+              labelFormatter={(label: string) => `${label} (${NER_FULL[label] ?? label})`}
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-mid)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
+            <Bar dataKey="support" radius={[0, 4, 4, 0]}>
+              {chartData.map((entry) => (
+                <Cell key={`support-${entry.label}`} fill={entry.color} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
+  )
+}
+
+function SeparabilityBars({ data }: { data: SeparabilityMetrics }) {
+  const chartData = [
+    { name: 'Baseline TF-IDF', similarity: data.clean_avg_similarity, std: data.clean_std },
+    { name: 'NER-Enhanced', similarity: data.ner_avg_similarity, std: data.ner_std },
+  ]
+
+  return (
+    <ChartCard title="Separability Core Metric" subtitle="Lower cosine similarity indicates better document separability">
+      <div style={{ width: '100%', height: 250 }}>
+        <ResponsiveContainer>
+          <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="name" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+            <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} />
+            <Tooltip
+              formatter={(value: number, key: string) => [value.toFixed(4), key === 'similarity' ? 'Mean similarity' : 'Std dev']}
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-mid)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="similarity" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="std" fill="var(--text-secondary)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
+  )
+}
+
+function VocabularyShiftPie({ data }: { data: SeparabilityMetrics }) {
+  const overlap = Math.max(data.top25_overlap_count, 0)
+  const unique = Math.max(25 - data.top25_overlap_count, 0)
+  const nerSpecificInsideTop25 = Math.min(Math.max(data.ner_specific_terms, 0), 25)
+  const pieData = [
+    { name: 'Shared top terms', value: overlap, color: 'var(--accent-hi)' },
+    { name: 'NER-unique top terms', value: unique, color: 'var(--ner-loc)' },
+    { name: 'Entity terms in top-25', value: nerSpecificInsideTop25, color: 'var(--ner-per)' },
+  ]
+
+  return (
+    <ChartCard title="Vocabulary Shift Mix" subtitle="How term composition changes after NER enrichment">
+      <div style={{ width: '100%', height: 250 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={pieData}
+              dataKey="value"
+              nameKey="name"
+              innerRadius={52}
+              outerRadius={82}
+              paddingAngle={2}
+            >
+              {pieData.map((entry) => (
+                <Cell key={`pie-${entry.name}`} fill={entry.color} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(value: number) => [value, 'Count']}
+              contentStyle={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-mid)',
+                borderRadius: 8,
+                color: 'var(--text-primary)',
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartCard>
+  )
 }
 
 const VERDICT_STYLE = {
@@ -75,7 +308,12 @@ function SeparabilitySection({ data }: { data: SeparabilityMetrics }) {
       </div>
 
       {/* Metrics grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid-2" style={{ marginBottom: 16 }}>
+        <SeparabilityBars data={data} />
+        <VocabularyShiftPie data={data} />
+      </div>
+
+      <div className="grid-2" style={{ gap: 16 }}>
         {/* Similarity bars */}
         <div className="card">
           <div style={{ fontSize: 9, fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 14 }}>
@@ -158,33 +396,42 @@ function ConllSection({ data, benchmark }: { data: EvalMetrics; benchmark: strin
 
       {/* Per-entity breakdown */}
       {data.per_entity && (
-        <div className="card">
-          <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 14 }}>
-            Per-entity breakdown
+        <>
+          <div className="grid-2" style={{ marginBottom: 16 }}>
+            <OverallQualityRadar data={data} />
+            <EntitySupportBars perEntity={data.per_entity} />
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', alignItems: 'center', gap: '8px 14px' }}>
-            {['', 'Precision', 'Recall', 'F1', 'Support'].map(h => (
-              <div key={h} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
-                {h}
-              </div>
-            ))}
-            {Object.entries(data.per_entity).map(([label, m]: [string, EntityMetrics]) => {
-              const color = NER_COLOR[label] ?? 'var(--text-secondary)'
-              return [
-                <div key={`${label}-name`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className={`badge badge-${label}`} style={{ fontSize: 9 }}>{label}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{NER_FULL[label] ?? label}</span>
-                </div>,
-                <MetricBar key={`${label}-p`} value={m.precision} color={color} />,
-                <MetricBar key={`${label}-r`} value={m.recall}    color={color} />,
-                <MetricBar key={`${label}-f`} value={m.f1}        color={color} />,
-                <span key={`${label}-s`} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', textAlign: 'right' }}>
-                  {m.support}
-                </span>,
-              ]
-            })}
+
+          <PerEntityQualityBars perEntity={data.per_entity} />
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 14 }}>
+              Per-entity numeric breakdown
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr 1fr auto', alignItems: 'center', gap: '8px 14px' }}>
+              {['', 'Precision', 'Recall', 'F1', 'Support'].map(h => (
+                <div key={h} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+                  {h}
+                </div>
+              ))}
+              {Object.entries(data.per_entity).map(([label, m]: [string, EntityMetrics]) => {
+                const color = NER_COLOR[label] ?? 'var(--text-secondary)'
+                return [
+                  <div key={`${label}-name`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className={`badge badge-${label}`} style={{ fontSize: 9 }}>{label}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{NER_FULL[label] ?? label}</span>
+                  </div>,
+                  <MetricBar key={`${label}-p`} value={m.precision} color={color} />,
+                  <MetricBar key={`${label}-r`} value={m.recall} color={color} />,
+                  <MetricBar key={`${label}-f`} value={m.f1} color={color} />,
+                  <span key={`${label}-s`} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', textAlign: 'right' }}>
+                    {m.support}
+                  </span>,
+                ]
+              })}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   )

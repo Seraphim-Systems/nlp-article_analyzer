@@ -92,12 +92,28 @@ def run_conll_eval(sample_size: int = DEFAULT_SAMPLE) -> dict[str, Any]:
     n        = min(sample_size, len(dataset))
     examples = dataset.select(range(n))
 
-    logger.info("Loading NER pipeline (%s)...", MODEL_NAME)
+    device = -1
+    device_label = "cpu"
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            device = 0
+            device_label = f"cuda ({torch.cuda.get_device_name(0)})"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+            device_label = "mps (Apple Metal)"
+    except Exception:
+        # Fallback to CPU if torch probing fails for any reason.
+        device = -1
+        device_label = "cpu"
+
+    logger.info("Loading NER pipeline (%s) on %s...", MODEL_NAME, device_label)
     ner = hf_pipeline(
         "ner",
         model=MODEL_NAME,
         aggregation_strategy="simple",
-        device=-1,  # CPU
+        device=device,
     )
 
     true_seqs: list[list[str]] = []

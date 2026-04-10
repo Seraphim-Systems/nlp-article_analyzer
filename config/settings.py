@@ -109,6 +109,15 @@ class Settings:
     )
 
     # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    #: Number of NER documents sampled for separability evaluation.
+    EVAL_SEPARABILITY_SAMPLE: int = field(
+        default_factory=lambda: _env_int("EVAL_SEPARABILITY_SAMPLE", 200)
+    )
+
+    # ------------------------------------------------------------------
     # RSS Feeds
     # ------------------------------------------------------------------
     #

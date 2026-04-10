@@ -103,6 +103,15 @@ class Settings:
     ENGLISH_ONLY: bool = field(default_factory=lambda: _env_bool("ENGLISH_ONLY", True))
 
     # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    #: Number of NER documents sampled for separability evaluation.
+    EVAL_SEPARABILITY_SAMPLE: int = field(
+        default_factory=lambda: _env_int("EVAL_SEPARABILITY_SAMPLE", 200)
+    )
+
+    # ------------------------------------------------------------------
     # RSS Feeds
     # ------------------------------------------------------------------
     #
