@@ -14,10 +14,10 @@ on:
         type: string
         default: "production"
       reset_volumes:
-        description: "If true, remove contents of <deploy_path>/data before deploying"
+        description: "If true, wipe application MongoDB databases before deploying"
         required: false
-        type: string
-        default: 'false'
+        type: boolean
+        default: false
     secrets:
       HETZNER_IP:
         required: true
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
-      - name: Deploy via SSH
+      - name: Prepare Target and Sync Code
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HETZNER_IP }}
@@ -43,68 +43,138 @@ jobs:
           key: ${{ secrets.HETZNER_KEY }}
           port: ${{ secrets.HETZNER_PORT || '22' }}
           script: |
-            set -e
-            echo "--- Starting Deployment to ${{ inputs.deploy_path }} ---"
+            set -euo pipefail
+            echo "--- Starting deployment to ${{ inputs.deploy_path }} ---"
             
             # 1. Prepare directory
-            mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo,prometheus,grafana}
+            mkdir -p ${{ inputs.deploy_path }}/data/{hf_cache,mongo}
             cd ${{ inputs.deploy_path }}
 
             # 2. Sync Code
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }}.git .
             else
-              git fetch --all
+              git fetch --all --prune
               git reset --hard origin/${{ github.ref_name }}
             fi
 
-            # 3. Optional: reset persistent volumes/data directory and drop DBs (after compose files are available)
-            if [ "${{ inputs.reset_volumes }}" = "true" ]; then
-              echo "--- Resetting volumes at ${{ inputs.deploy_path }}/data ---"
+      - name: Optional Database Wipe (Flag-Gated)
+        if: ${{ inputs.reset_volumes == true }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
+          script: |
+            set -euo pipefail
+            echo "--- reset_volumes=true: wiping MongoDB application databases ---"
+            cd ${{ inputs.deploy_path }}
 
-              # Determine compose file (same logic used later)
-              COMPOSE_FILE="docker-compose.yml"
-              [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
+            COMPOSE_FILE="docker-compose.yml"
+            [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
 
-              # Stop any running stack to avoid file locks
-              docker compose -f "$COMPOSE_FILE" down || true
+            # Start MongoDB so database drop can run even if stack was stopped.
+            docker compose -f "$COMPOSE_FILE" up -d mongodb
 
-              # Remove host-mounted data (hf_cache, mongo, prometheus, grafana)
-              rm -rf "${{ inputs.deploy_path }}/data"/* || true
+            READY=0
+            for i in $(seq 1 30); do
+              if docker compose -f "$COMPOSE_FILE" exec -T mongodb mongosh --quiet --eval "db.adminCommand('ping')" >/dev/null 2>&1; then
+                READY=1
+                break
+              fi
+              echo "Waiting for MongoDB... ($i/30)"
+              sleep 2
+            done
 
-              # Start MongoDB alone so we can drop databases explicitly
-              docker compose -f "$COMPOSE_FILE" up -d mongodb || true
-
-              # Wait for MongoDB to accept connections
-              for i in $(seq 1 30); do
-                if docker compose -f "$COMPOSE_FILE" exec -T mongodb mongosh --quiet --eval "db.adminCommand('ping')" >/dev/null 2>&1; then
-                  echo "MongoDB is ready"
-                  break
-                fi
-                echo "Waiting for MongoDB... ($i)"
-                sleep 2
-              done
-
-              # Drop application databases to ensure a clean state
-              docker compose -f "$COMPOSE_FILE" exec -T mongodb mongosh --quiet --eval "db.getSiblingDB('nlp_raw').dropDatabase(); db.getSiblingDB('nlp_clean').dropDatabase(); db.getSiblingDB('nlp_classified').dropDatabase(); db.getSiblingDB('nlp_models').dropDatabase(); db.getSiblingDB('nlp_ner').dropDatabase();" || true
-
-              # Stop the temporary mongo service so the full stack can start fresh later
-              docker compose -f "$COMPOSE_FILE" down || true
+            if [ "$READY" -ne 1 ]; then
+              echo "MongoDB did not become ready in time"
+              exit 1
             fi
+
+            docker compose -f "$COMPOSE_FILE" exec -T mongodb mongosh --quiet --eval "db.getSiblingDB('nlp_raw').dropDatabase(); db.getSiblingDB('nlp_clean').dropDatabase(); db.getSiblingDB('nlp_classified').dropDatabase(); db.getSiblingDB('nlp_models').dropDatabase(); db.getSiblingDB('nlp_ner').dropDatabase();"
+
+            echo "--- MongoDB application databases wiped ---"
+
+      - name: Write Environment File
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
+          script: |
+            set -euo pipefail
+            cd ${{ inputs.deploy_path }}
 
             # 3. Create .env file
             echo "--- Creating .env file ---"
             printf "%b" "${{ secrets.env_vars }}" > .env
             echo "Successfully created .env"
 
+      - name: Build Images
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
+          script: |
+            set -euo pipefail
+            cd ${{ inputs.deploy_path }}
+
             # 4. Identify Compose File
             COMPOSE_FILE="docker-compose.yml"
             [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
             echo "Using config: $COMPOSE_FILE"
 
-            # 4. Orchestrate
+            # 4. Build
             docker compose -f $COMPOSE_FILE build
+
+      - name: Start Services
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
+          script: |
+            set -euo pipefail
+            cd ${{ inputs.deploy_path }}
+
+            COMPOSE_FILE="docker-compose.yml"
+            [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
+
             docker compose -f $COMPOSE_FILE up -d
+
+      - name: Refresh Frontend Upstream Cache
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
+          script: |
+            set -euo pipefail
+            cd ${{ inputs.deploy_path }}
+
+            COMPOSE_FILE="docker-compose.yml"
+            [ -f "docker-compose.prod.yml" ] && COMPOSE_FILE="docker-compose.prod.yml"
+
+            # Frontend nginx resolves Docker DNS on startup; restart to pick up latest API container IP
+            if docker compose -f "$COMPOSE_FILE" config --services | grep -qx frontend; then
+              docker compose -f "$COMPOSE_FILE" restart frontend
+            fi
+
+      - name: Housekeeping
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HETZNER_IP }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_KEY }}
+          port: ${{ secrets.HETZNER_PORT || '22' }}
+          script: |
+            set -euo pipefail
 
             # 5. Housekeeping
             docker image prune -f

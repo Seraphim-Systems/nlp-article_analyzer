@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       reset_volumes:
-        description: "If true, remove contents of <deploy_path>/data before deploying"
+        description: "If true, wipe application MongoDB databases before deploying"
         required: false
-        default: 'false'
-        type: string
+        default: false
+        type: boolean
 
 jobs:
   production-deploy:
@@ -15,7 +15,7 @@ jobs:
     with:
       deploy_path: "~/nlp-project"
       environment: "production"
-      reset_volumes: ${{ github.event.inputs.reset_volumes || 'false' }}
+      reset_volumes: ${{ inputs.reset_volumes }}
     secrets:
       HETZNER_IP: ${{ secrets.HETZNER_IP }}
       HETZNER_USER: ${{ secrets.HETZNER_USER }}

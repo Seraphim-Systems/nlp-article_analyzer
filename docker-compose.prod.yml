@@ -2,9 +2,16 @@
 # PRODUCTION DEPLOYMENT SETUP
 # ──────────────────────────────────────────────────────────────────────────
 # Optimized for production:
-# - Data stored in ./data/
+# - Host-mounted data in ./data/ (mongo, hf_cache)
+# - Named volumes for Grafana and Prometheus state
 # - Services on the 'proxy' network
 # - Resource limits and health checks
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
 
 services:
   # ── MongoDB database ────────────────────────────────────────────────────
@@ -94,7 +101,8 @@ services:
     container_name: nlp_frontend
     restart: always
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - proxy
     expose:
@@ -137,6 +145,12 @@ services:
     command: api
     expose:
       - "80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -159,7 +173,8 @@ services:
     container_name: nlp_prometheus
     restart: always
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - proxy
     expose:
@@ -167,7 +182,7 @@ services:
     volumes:
       - ./monitoring/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus.alerts.yml:/etc/prometheus/alerts.yml:ro
-      - ./data/prometheus:/prometheus
+      - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -205,7 +220,7 @@ services:
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/nlp_pipeline.json
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./data/grafana:/var/lib/grafana
+      - grafana_data:/var/lib/grafana
     deploy:
       resources:
         limits:
