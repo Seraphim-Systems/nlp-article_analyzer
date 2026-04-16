@@ -240,6 +240,7 @@ def cleaner_mocks():
     """Set up all mocks needed by cleaner module functions."""
     fake_col = MagicMock()
     fake_col.find.return_value = []
+    fake_col.count_documents.return_value = 0
     with patch("cleaning.cleaner.make_pbar_simple", side_effect=lambda x, **kw: x), \
          patch("cleaning.cleaner.rank_article_with_reasons") as mock_rank, \
          patch("cleaning.cleaner.fill_missing_fields", side_effect=lambda a: a) as mock_fill, \
@@ -251,6 +252,7 @@ def cleaner_mocks():
          patch("cleaning.cleaner.update_raw_article_fields") as mock_update_fields, \
          patch("cleaning.cleaner.update_raw_rank") as mock_update_rank, \
          patch("cleaning.cleaner.upsert_clean_articles", return_value=0) as mock_upsert_clean, \
+         patch("cleaning.cleaner.get_raw_collection", return_value=fake_col), \
          patch("database.repositories.get_raw_collection", return_value=fake_col):
         yield {
             "rank": mock_rank,
@@ -286,6 +288,7 @@ def test_cleaner_promotes_rank0(cleaner_mocks):
 
     cleaner_mocks["get_by_rank"].side_effect = get_by_rank_side
     cleaner_mocks["upsert_clean"].return_value = 1
+    cleaner_mocks["fake_col"].count_documents.return_value = 1
 
     result = run_cleaning_pipeline()
     cleaner_mocks["upsert_clean"].assert_called_once()
@@ -303,6 +306,7 @@ def test_cleaner_quarantines_rank2(cleaner_mocks):
 
     cleaner_mocks["get_by_rank"].side_effect = get_by_rank_side
     cleaner_mocks["quarantine"].return_value = 1
+    cleaner_mocks["fake_col"].count_documents.return_value = 1
 
     result = run_cleaning_pipeline()
     cleaner_mocks["quarantine"].assert_called_once()
@@ -324,6 +328,7 @@ def test_cleaner_rank1_recovery_promotes(cleaner_mocks):
     cleaner_mocks["get_by_rank"].return_value = rank1_art
     cleaner_mocks["rank"].return_value = (0, [])
     cleaner_mocks["fill"].side_effect = lambda a: {**a, "sum": "recovered"}
+    cleaner_mocks["fake_col"].count_documents.return_value = 1
 
     _process_rank1()
 
@@ -339,8 +344,8 @@ def test_cleaner_rank1_no_change_no_field_update(cleaner_mocks):
 
     cleaner_mocks["get_by_rank"].return_value = rank1_art
     cleaner_mocks["rank"].return_value = (1, ["missing_optional:sum"])
-    # fill returns unchanged article
     cleaner_mocks["fill"].side_effect = lambda a: a
+    cleaner_mocks["fake_col"].count_documents.return_value = 1
 
     _process_rank1()
 
