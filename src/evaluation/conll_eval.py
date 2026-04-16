@@ -1,11 +1,11 @@
 """
-WikiANN benchmark evaluation for dslim/bert-base-NER.
+CoNLL-2003 benchmark evaluation for dslim/bert-base-NER.
 
-Loads the WikiANN English test split via HuggingFace datasets, runs BERT NER
+Loads the CoNLL-2003 English test split via HuggingFace datasets, runs BERT NER
 inference, and computes strict entity-level P/R/F1 via seqeval.
 
-WikiANN covers PER, ORG, LOC entity types and is hosted as parquet files,
-making it reliably loadable with any recent version of the datasets library.
+CoNLL-2003 covers PER, ORG, LOC, MISC entity types and is the dataset this model
+was fine-tuned on, making it the correct benchmark for evaluating dslim/bert-base-NER.
 
 This produces academically defensible NER quality metrics (model vs human-annotated
 ground truth) rather than a silver-label BERT-vs-BERT consistency check.
@@ -18,8 +18,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MODEL_NAME     = "dslim/bert-base-NER"
-BENCHMARK      = "wikiann"
-DEFAULT_SAMPLE = 10000  # sentences; wikiann English test set is ~10k
+BENCHMARK      = "conll2003"
+DEFAULT_SAMPLE = 3684   # full CoNLL-2003 English test set
 
 
 def _build_char_offsets(tokens: list[str]) -> list[tuple[int, int]]:
@@ -57,12 +57,12 @@ def _spans_to_bio(tokens: list[str], predictions: list[dict]) -> list[str]:
 
 def run_conll_eval(sample_size: int = DEFAULT_SAMPLE) -> dict[str, Any]:
     """
-    Evaluate dslim/bert-base-NER on the WikiANN English test split.
+    Evaluate dslim/bert-base-NER on the CoNLL-2003 English test split.
 
     Parameters
     ----------
     sample_size : int
-        Number of sentences to evaluate (default 10000; full test = ~10k).
+        Number of sentences to evaluate (default 3684; full CoNLL-2003 test set).
 
     Returns
     -------
@@ -85,8 +85,8 @@ def run_conll_eval(sample_size: int = DEFAULT_SAMPLE) -> dict[str, Any]:
     except ImportError as exc:
         raise RuntimeError(f"Missing dependency for CoNLL eval: {exc}") from exc
 
-    logger.info("Loading WikiANN English test split (sample=%d)...", sample_size)
-    dataset = load_dataset(BENCHMARK, "en", split="test")
+    logger.info("Loading CoNLL-2003 English test split (sample=%d)...", sample_size)
+    dataset = load_dataset(BENCHMARK, split="test", trust_remote_code=True)
     tag_names: list[str] = dataset.features["ner_tags"].feature.names
 
     n        = min(sample_size, len(dataset))
