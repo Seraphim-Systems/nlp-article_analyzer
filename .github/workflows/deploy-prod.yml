@@ -26,3 +26,4 @@ jobs:
         KAGGLE_USERNAME=${{ secrets.KAGGLE_USERNAME }}
         KAGGLE_KEY=${{ secrets.KAGGLE_KEY }}
         MONGO_ROOT_PASSWORD=${{ secrets.MONGO_ROOT_PASSWORD }}
+        EVAL_SEPARABILITY_SAMPLE=${{ secrets.EVAL_SEPARABILITY_SAMPLE }}
