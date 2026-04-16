@@ -389,6 +389,9 @@ def run(
         # ── Final collection sizes ────────────────────────────────────────────
         _print_collection_sizes()
 
+        if result["errors"]:
+            result["status"] = "failed"
+
     except Exception as e:
         logger.exception("Classify job failed")
         result["status"] = "failed"
